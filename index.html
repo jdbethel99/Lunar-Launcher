@@ -224,7 +224,7 @@
         let width, height;
         const GRAVITY = 15; const THRUST = 44; const MAX_ROT_SPEED = 2.2;
         const ORBITAL_VELOCITY = 45; const VELOCITY_TOLERANCE = 12;
-        const TIME_SCALE = 0.75; const LOST_BUFFER = 600; const HUD_HEIGHT = 140;
+        const TIME_SCALE = 0.75; const LOST_BUFFER = 100; const HUD_HEIGHT = 140;
         let TARGET_ALT_Y; const ALT_ENVELOPE = 45;
 
         let ship, booster, terrain = [], pads = [], launchPad = {};
@@ -458,6 +458,9 @@
                     if (!ship.landed && !ship.crashed) { ship.yv += GRAVITY * dt; ship.x += ship.xv * dt; ship.y += ship.yv * dt; checkColl(ship); }
                     if (!booster.landed && !booster.crashed) { booster.yv += GRAVITY * dt; booster.x += booster.xv * dt; booster.y += booster.yv * dt; checkColl(booster); }
                 }
+
+                if (booster.y > height - HUD_HEIGHT + 20 || booster.x < -LOST_BUFFER || booster.x > width + LOST_BUFFER || booster.y < -LOST_BUFFER) { booster.crashed = true; ship.crashed = true;}
+                if (ship.y > height - HUD_HEIGHT + 20 || ship.x < -LOST_BUFFER || ship.x > width + LOST_BUFFER || ship.y < -LOST_BUFFER) { ship.crashed = true; booster.crashed = true;}
 
                 if (!ship.thrusting && !separated && Math.abs(ship.yv) < 0.1 && Math.random() > 0.9) {
                     smokeTrail.push({

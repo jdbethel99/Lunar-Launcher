@@ -349,7 +349,7 @@
             }
 
             craters = [];
-            for (let i = 0; i < 45; i++) {
+            for (let i = 0; i < 10; i++) {
                 const x = Math.random() * width;
                 const groundPoint = terrain.find(p => p.x > x) || terrain[terrain.length - 1];
                 const groundY = groundPoint.y;
@@ -389,7 +389,9 @@
 
         function triggerExplosion(x, y) {
             if (audioCtx) playSound('sep');
-            for (let i = 0; i < 60; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 60, vy: (Math.random() - 0.5) * 60, life: 2.0, size: 5, plasma: true });
+            for (let i = 0; i < 20; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160, life: 0.5, size: 2, plasma: true });            
+            for (let i = 0; i < 10; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 60, vy: (Math.random() - 0.5) * 60, life: 1.0, size: 5, plasma: true });
+            for (let i = 0; i < 3; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20, life: 2.0, size: 25, plasma: true });
         }
 
         function triggerSeparationSmoke(x, y) { for (let i = 0; i < 45; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 18, vy: (Math.random() - 0.5) * 18, life: 0.8, size: 3.5, plasma: false }); }
@@ -658,7 +660,7 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 // Render text centered within the acceptable altitude band
-                ctx.fillText('Insert Satellites In Orbit', width / 2, TARGET_ALT_Y);
+                ctx.fillText('Deploy Satellites Into Orbit', width / 2, TARGET_ALT_Y);
                 ctx.restore();
             }
             

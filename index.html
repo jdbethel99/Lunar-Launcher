@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-<!-- LUNAR LAUNCHER: Full-Detail Rendering + Terrain Buggies + Detailed Eagles + PERSISTENT CONSTELLATION + NETWORK OPS + STARTUP INSTRUCTIONS -->
+<!-- LUNAR LAUNCHER: UNIFIED BITMAP EDITION -->
 
 <head>
     <meta charset="UTF-8">
@@ -19,6 +19,8 @@
 
         canvas {
             display: block;
+            width: 100vw;
+            height: 100vh;
         }
 
         #splash {
@@ -45,79 +47,6 @@
             transition: opacity 1.5s ease-in-out;
         }
 
-        #telemetry-bar {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 140px;
-            background: rgba(10, 10, 10, 0.95);
-            border-top: 1px solid #333;
-            display: flex;
-            justify-content: flex-start;
-            align-items: center;
-            gap: 15px;
-            padding: 0 30px;
-            box-sizing: border-box;
-            backdrop-filter: blur(15px);
-            z-index: 200;
-        }
-
-        .instructions-box {
-            width: 380px;
-            font-size: 18px;
-            color: #888;
-            border-right: 1px solid #333;
-            padding-right: 20px;
-            margin-right: 10px;
-            text-transform: uppercase;
-        }
-
-        .gauge-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            width: 110px;
-        }
-
-        .gauge-label {
-            font-size: 12px;
-            font-weight: bold;
-            color: #666;
-            margin-top: 10px;
-            text-transform: uppercase;
-            text-align: center;
-        }
-
-        #inventory-display {
-            font-size: 32px;
-            font-weight: bold;
-            color: #00ffff;
-            height: 80px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: monospace;
-        }
-
-        .network-ops-sector {
-            border-left: 1px solid #333;
-            padding-left: 20px;
-            margin-left: 10px;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        #milestone-text {
-            font-size: 18px;
-            color: #ff00ff;
-            font-family: monospace;
-            text-transform: uppercase;
-            line-height: 1.1;
-            width: 140px;
-        }
-
         #msg {
             position: absolute;
             top: 35%;
@@ -131,21 +60,6 @@
             border: 1px solid #005288;
             z-index: 300;
         }
-
-        #payload-status {
-            height: 80px;
-            width: 80px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            border: 2px solid #222;
-            border-radius: 50%;
-            font-size: 10px;
-            font-weight: bold;
-            transition: all 0.3s;
-            text-align: center;
-        }
     </style>
 </head>
 
@@ -157,92 +71,100 @@
 
     <div id="msg"></div>
 
-    <div id="telemetry-bar">
-        <div class="instructions-box">
-            <b>ARROWS:</b> THRUST & ROTATION<br>
-            <b>S KEY:</b> STAGE SEPARATION<br>
-            <b>D KEY:</b> DEPLOY SATELLITES!<br>
-            <b>A KEY:</b> AUTO LAND ENABLE<br>
-        </div>
-        <div class="gauge-container">
-            <div id="inventory-display">50</div>
-            <div class="gauge-label">SATS REMAINING</div>
-        </div>
-        <div class="gauge-container"><canvas id="gauge-hspd" width="80" height="80"></canvas>
-            <div class="gauge-label">HORIZONTAL SPD</div>
-        </div>
-        <div class="gauge-container"><canvas id="gauge-vspd" width="80" height="80"></canvas>
-            <div class="gauge-label">VERTICAL SPD</div>
-        </div>
-        <div class="gauge-container"><canvas id="gauge-alt" width="80" height="80"></canvas>
-            <div class="gauge-label">ALTITUDE</div>
-        </div>
-        <div class="gauge-container">
-            <div id="payload-status">READY</div>
-            <div class="gauge-label">PAYLOAD ZONE</div>
-        </div>
-        <div class="gauge-container"><canvas id="gauge-fuel" width="80" height="80"></canvas>
-            <div class="gauge-label">PROPELLANT</div>
-        </div>
-        <div class="gauge-container">
-            <div id="timer-box" style="height: 80px; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 16px; color: #00ffff;">
-                T+ 00:00</div>
-            <div class="gauge-label">MISSION TIME</div>
-        </div>
-        <div class="gauge-container"><canvas id="gauge-auto" width="80" height="80"></canvas>
-            <div class="gauge-label">AUTOLAND [A]</div>
-        </div>
-
-        <div class="network-ops-sector">
-            <div class="gauge-container">
-                <canvas id="gauge-bandwidth" width="80" height="80"></canvas>
-                <div class="gauge-label">BANDWIDTH</div>
-            </div>
-            <div class="gauge-container" style="align-items: flex-start;">
-                <div id="constellation-total" style="font-size: 20px; font-weight: bold; color: #ff00ff; height: 30px; font-family: monospace;">
-                    SATS: 0</div>
-                <div id="milestone-text">OFFLINE</div>
-                <div class="gauge-label">NETWORK OPS</div>
-            </div>
-        </div>
-    </div>
-
     <canvas id="landCanvas"></canvas>
 
     <script>
+
+        const planetImg = new Image();
+        planetImg.src = 'saturn.jpg';
+
         const canvas = document.getElementById('landCanvas');
         const ctx = canvas.getContext('2d');
+        let bgMusic = null;
+
+        // --- BITMAP RENDERING SETUP ---
+        const virtualWidth = 1920;
+        const virtualPlayHeight = 1080; // The original gameplay arena
+        const virtualHUDHeight = 140;   // The telemetry area
+        const virtualHeight = virtualPlayHeight + virtualHUDHeight; // Total 1220px
+
+        const offScreenCanvas = document.createElement('canvas');
+        offScreenCanvas.width = virtualWidth;
+        offScreenCanvas.height = virtualHeight;
+        const vCtx = offScreenCanvas.getContext('2d');
+        // ------------------------------
+
         const msgBox = document.getElementById('msg');
-        const timerBox = document.getElementById('timer-box');
-        const payloadHUD = document.getElementById('payload-status');
-        const invHUD = document.getElementById('inventory-display');
         const splashDiv = document.getElementById('splash');
         const splashImg = document.getElementById('splash-image');
-        const constellationHUD = document.getElementById('constellation-total');
-        const milestoneHUD = document.getElementById('milestone-text');
 
-        let width, height;
+        let width, height; // Logic will use 'height' for 1080 area
         const GRAVITY = 15; const THRUST = 44; const MAX_ROT_SPEED = 2.2;
         const ORBITAL_VELOCITY = 45; const VELOCITY_TOLERANCE = 12;
-        const TIME_SCALE = 0.75; const LOST_BUFFER = 100; const HUD_HEIGHT = 140;
+        const TIME_SCALE = 0.75; const LOST_BUFFER = 100;
+        const EAGLE_WIDTH = 100; const EAGLE_HEIGHT = 50;
         let TARGET_ALT_Y; const ALT_ENVELOPE = 45;
 
         let ship, booster, terrain = [], pads = [], launchPad = {};
         let smokeTrail = [], stars = [], legacySats = [], backgroundObjects = [];
-        let craters = [];
-        let satellites = [];
+        let craters = [], satellites = [];
 
         let gameOver = false, separated = false, totalDeployed = 0, doorOpen = false, satInventory = 50;
         let lastTime = performance.now(), missionStart = lastTime;
-        // Instruction timer variable
-        let instructionsStartTime = null; 
+        let demoPhase = 'launch', lastDeployTime = 0, instructionsStartTime = null;
         let animationId = null, pulseAngle = 0, cosmeticObjPulse = 0;
         let splashActive = true; let rotKeyHeldTime = 0; const keys = {};
+        let timeSinceGameOver = 0, audioCtx = null, engineOsc = null, engineGain = null;
 
-        let audioCtx = null, engineOsc = null, engineGain = null;
+        // UI State Object (replaces DOM element properties)
+        const uiState = {
+            timer: "T+ 00:00",
+            milestone: "OFFLINE",
+            payloadText: "READY",
+            payloadInZone: false,
+            satCount: 0,
+            mbps: 0
+        };
+
+        function resetGame() {
+            const startX = (launchPad.x1 + launchPad.x2) / 2;
+            const boosterY = launchPad.y - 25;
+            const shipY = boosterY - 44;
+            ship = { id: 'Ship', x: startX, y: shipY, xv: 0, yv: 0, width: 20, height: 60, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: false, landed: false, crashed: false, exploded: false, color: '#00a8a8' };
+            booster = { id: 'Booster', x: startX, y: boosterY, xv: 0, yv: 0, width: 30, height: 50, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: false, landed: false, crashed: false, exploded: false, color: '#b0b0b0', legsVisible: true };
+            demoPhase = 'launch'; separated = false; doorOpen = false; satInventory = 50; lastDeployTime = 0;
+            msgBox.style.display = 'none'; missionStart = performance.now(); smokeTrail = [];
+            generateCosmeticObjects();
+        }
+
+        // function initAudio() {
+        //     if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+        //     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        //     audioCtx.resume();
+        //     engineOsc = audioCtx.createOscillator(); engineGain = audioCtx.createGain();
+        //     engineOsc.type = 'sawtooth'; engineOsc.frequency.setValueAtTime(55, audioCtx.currentTime);
+        //     engineGain.gain.setValueAtTime(0, audioCtx.currentTime);
+        //     engineOsc.connect(engineGain); engineGain.connect(audioCtx.destination);
+        //     engineOsc.start();
+        // }
+
+
         function initAudio() {
-            if (audioCtx) return;
+            if (audioCtx) {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                return;
+            }
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            audioCtx.resume();
+
+            // --- ADD THIS BLOCK ---
+            if (!bgMusic) {
+                bgMusic = new Audio('gameMusic.mp3');
+                bgMusic.loop = true;
+                bgMusic.volume = 0.4; // Adjust this (0.0 to 1.0) so it doesn't drown out engines
+            }
+            // -----------------------
+
             engineOsc = audioCtx.createOscillator(); engineGain = audioCtx.createGain();
             engineOsc.type = 'sawtooth'; engineOsc.frequency.setValueAtTime(55, audioCtx.currentTime);
             engineGain.gain.setValueAtTime(0, audioCtx.currentTime);
@@ -252,144 +174,123 @@
 
         function playSound(type) {
             if (!audioCtx) return;
-            if (audioCtx.state === 'suspended') audioCtx.resume();
             const now = audioCtx.currentTime;
             const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
             o.connect(g); g.connect(audioCtx.destination);
-            if (type === 'deploy') {
-                o.type = 'triangle'; o.frequency.setValueAtTime(440, now); o.frequency.exponentialRampToValueAtTime(880, now + 0.1);
-                g.gain.setValueAtTime(0.05, now); g.gain.linearRampToValueAtTime(0, now + 0.1);
-                o.start(); o.stop(now + 0.1);
-            } else if (type === 'sep') {
-                o.type = 'sawtooth'; o.frequency.setValueAtTime(110, now);
-                g.gain.setValueAtTime(0.15, now); g.gain.linearRampToValueAtTime(0, now + 0.2);
-                o.start(); o.stop(now + 0.2);
-            } else if (type === 'success') {
-                [523, 659, 783, 1046].forEach((f, i) => {
-                    const o2 = audioCtx.createOscillator(); const g2 = audioCtx.createGain();
-                    o2.type = 'square'; o2.connect(g2); g2.connect(audioCtx.destination);
-                    o2.frequency.setValueAtTime(f, now + i * 0.1); g2.gain.setValueAtTime(0.04, now + i * 0.1);
-                    g2.gain.linearRampToValueAtTime(0, now + i * 0.1 + 0.2); o2.start(now + i * 0.1); o2.stop(now + i * 0.1 + 0.2);
-                });
-            }
+            if (type === 'deploy') { o.type = 'triangle'; o.frequency.setValueAtTime(440, now); o.frequency.exponentialRampToValueAtTime(880, now + 0.1); g.gain.setValueAtTime(0.05, now); g.gain.linearRampToValueAtTime(0, now + 0.1); o.start(); o.stop(now + 0.1); }
+            else if (type === 'sep') { o.type = 'sawtooth'; o.frequency.setValueAtTime(110, now); g.gain.setValueAtTime(0.1, now); g.gain.linearRampToValueAtTime(0, now + 0.2); o.start(); o.stop(now + 0.2); }
+            else if (type === 'crash') { o.type = 'sawtooth'; o.frequency.setValueAtTime(60, now); o.frequency.exponentialRampToValueAtTime(30, now + 0.8); g.gain.setValueAtTime(0.3, now); g.gain.linearRampToValueAtTime(0, now + 0.8); o.start(); o.stop(now + 0.8); }
+            else if (type === 'success') { [523, 659, 783, 1046].forEach((f, i) => { const o2 = audioCtx.createOscillator(); const g2 = audioCtx.createGain(); o2.type = 'square'; o2.connect(g2); g2.connect(audioCtx.destination); o2.frequency.setValueAtTime(f, now + i * 0.1); g2.gain.setValueAtTime(0.04, now + i * 0.1); g2.gain.linearRampToValueAtTime(0, now + i * 0.1 + 0.2); o2.start(now + i * 0.1); o2.stop(now + i * 0.1 + 0.2); }); }
         }
 
-        function setEngineVolume(vol) { if (engineGain) engineGain.gain.setTargetAtTime(vol * 0.1, audioCtx.currentTime, 0.05); }
-
-        function playIntroNote(freq, duration) {
-            if (!audioCtx) initAudio();
-            const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-            o.type = 'square'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
-            o.connect(g); g.connect(audioCtx.destination);
-            g.gain.setValueAtTime(0.05, audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-            o.start(); o.stop(audioCtx.currentTime + duration);
-        }
+        function setEngineVolume(vol) { if (engineGain) engineGain.gain.setTargetAtTime(vol * 0.05, audioCtx.currentTime, 0.05); }
 
         async function triggerSplashScreen() {
-            splashActive = true;
-            splashDiv.style.opacity = "1";
+            splashActive = true; splashDiv.style.opacity = "1";
             setTimeout(() => { if (splashImg) splashImg.style.opacity = "1"; }, 100);
-            if (audioCtx) {
-                playIntroNote(261.63, 1.0);
-                setTimeout(() => playIntroNote(329.63, 1.0), 150);
-                setTimeout(() => playIntroNote(392.00, 1.5), 300);
-            }
+            playIntroSong();
             setTimeout(() => {
-                splashDiv.style.opacity = "0"; 
-                setTimeout(() => { 
-                    splashDiv.style.display = 'none'; 
-                    splashActive = false; 
-                    missionStart = performance.now(); 
-                    // Start the instruction timer when gameplay begins
-                    instructionsStartTime = performance.now(); 
-                }, 1500);
+                splashDiv.style.opacity = "0";
+                setTimeout(() => { splashDiv.style.display = 'none'; splashActive = false; missionStart = performance.now(); instructionsStartTime = performance.now(); if (bgMusic) bgMusic.play(); }, 1500);
             }, 4000);
+
         }
 
         function init(keepAutopilot = false, isReset = false) {
             if (animationId) cancelAnimationFrame(animationId);
-            width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight;
-            TARGET_ALT_Y = height * 0.25; gameOver = false; separated = false; totalDeployed = 0; doorOpen = false;
-            satInventory = 50;
-            if (!isReset) satellites = [];
-            // Reset instruction timer on new game/reset
-            instructionsStartTime = null; 
-
-            msgBox.style.display = 'none'; const now = performance.now(); lastTime = now; missionStart = now;
+            width = virtualWidth;
+            height = virtualPlayHeight; // Constant 1080 for physics
+            TARGET_ALT_Y = height * 0.25; gameOver = false; separated = false; totalDeployed = 0; doorOpen = false; satInventory = 50; timeSinceGameOver = 0;
+            if (!isReset) { satellites = []; splashActive = true; } else { splashActive = false; }
+            instructionsStartTime = null; msgBox.style.display = 'none';
+            const now = performance.now(); lastTime = now; missionStart = now;
             smokeTrail = []; legacySats = []; backgroundObjects = []; rotKeyHeldTime = 0; cosmeticObjPulse = 0;
-
             generateTerrain(); generateCosmeticObjects();
             const startX = (launchPad.x1 + launchPad.x2) / 2;
             const boosterY = launchPad.y - 25; const shipY = boosterY - 44;
-
-            ship = { id: 'Ship', x: startX, y: shipY, xv: 0, yv: 0, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: keepAutopilot, landed: false, crashed: false, exploded: false, color: '#00a8a8' };
-            booster = { id: 'Booster', x: startX, y: boosterY, xv: 0, yv: 0, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: keepAutopilot, landed: false, crashed: false, exploded: false, color: '#b0b0b0', legsVisible: true };
-
-            stars = []; for (let i = 0; i < 150; i++) stars.push({ x: Math.random() * width, y: Math.random() * (height * 0.66), size: Math.random() * 1.5, opacity: Math.random() });
+            ship = { id: 'Ship', x: startX, y: shipY, xv: 0, yv: 0, width: 20, height: 60, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: keepAutopilot, landed: false, crashed: false, exploded: false, color: '#00a8a8' };
+            booster = { id: 'Booster', x: startX, y: boosterY, xv: 0, yv: 0, width: 30, height: 50, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: keepAutopilot, landed: false, crashed: false, exploded: false, color: '#b0b0b0', legsVisible: true };
+            stars = [];
+            for (let i = 0; i < 150; i++) stars.push({ x: Math.random() * width, y: Math.random() * (height * 0.66), size: Math.random() * 1.5, opacity: Math.random() });
             for (let i = 0; i < 20; i++) legacySats.push({ x: Math.random() * width, y: TARGET_ALT_Y + (Math.random() - 0.5) * (ALT_ENVELOPE * 3), vx: 35 + Math.random() * 25, vy: (Math.random() - 0.5) * 10, size: 3, opacity: 0.2 + Math.random() * 0.3 });
-
-            if (!isReset) triggerSplashScreen(); else { splashDiv.style.display = 'none'; splashActive = false; instructionsStartTime = performance.now(); }
-            animationId = requestAnimationFrame(update);
+            if (!isReset) triggerSplashScreen(); else { splashDiv.style.display = 'none'; instructionsStartTime = performance.now(); }
+            lastTime = performance.now(); animationId = requestAnimationFrame(update);
         }
 
         function generateTerrain() {
             terrain = []; pads = []; const points = 220; const spacing = width / points; const seed = Math.random() * 1000;
+            // const getTerrainHeight = (x) => {
+            //     const h1 = Math.sin(x * 0.003 + seed) * 130;
+            //     const h2 = Math.sin(x * 0.01 + seed * 1.5) * 60;
+            //     const h3 = Math.sin(x * 0.025 + seed * 2) * 15;
+            //     return height - (350 + h1 + h2 + h3);
+            // };
             const getTerrainHeight = (x) => {
-                const h1 = Math.sin(x * 0.003 + seed) * 60; const h2 = Math.sin(x * 0.01 + seed * 1.5) * 30;
-                const h3 = Math.sin(x * 0.025 + seed * 2) * 12; return height - (280 + h1 + h2 + h3);
+                // Reduce these multipliers to flatten the terrain
+                const h1 = Math.sin(x * 0.003 + seed) * 50;  // Was 130 (Large mountains)
+                const h2 = Math.sin(x * 0.01 + seed * 1.5) * 20; // Was 60  (Medium hills)
+                const h3 = Math.sin(x * 0.025 + seed * 2) * 5;   // Was 15  (Surface detail/crags)
+
+                // This base offset (350) determines the average height of the ground
+                return height - (200 + h1 + h2 + h3);
             };
-            const lpStart = 10, lpEnd = 25, lpY = height - 200; launchPad = { x1: lpStart * spacing, x2: lpEnd * spacing, y: lpY };
-            const p1Start = Math.floor(points * 0.35); const p2Start = Math.floor(points * 0.75); const padPointWidth = 7;
+
+            const lpStart = 10, lpEnd = 25;
+            const lpY = getTerrainHeight(lpStart * spacing);
+            launchPad = { x1: lpStart * spacing, x2: lpEnd * spacing, y: lpY };
+            const p1Start = Math.floor(points * (0.15 + Math.random() * 0.30));
+            const p2Start = Math.floor(points * (0.60 + Math.random() * 0.25));
+            const padPointWidth = 7;
             for (let i = 0; i <= points; i++) {
                 let tx = i * spacing; let ty;
                 if (i >= lpStart && i <= lpEnd) ty = lpY;
                 else if (i >= p1Start && i <= p1Start + padPointWidth) { ty = getTerrainHeight(p1Start * spacing); if (i === p1Start) pads.push({ x1: tx, x2: tx + (padPointWidth * spacing), y: ty, owner: 'Booster' }); }
                 else if (i >= p2Start && i <= p2Start + padPointWidth) { ty = getTerrainHeight(p2Start * spacing); if (i === p2Start) pads.push({ x1: tx, x2: tx + (padPointWidth * spacing), y: ty, owner: 'Ship' }); }
-                else ty = getTerrainHeight(tx); terrain.push({ x: tx, y: ty });
+                else ty = getTerrainHeight(tx);
+                terrain.push({ x: tx, y: ty });
             }
-
             craters = [];
             for (let i = 0; i < 10; i++) {
-                const x = Math.random() * width;
-                const groundPoint = terrain.find(p => p.x > x) || terrain[terrain.length - 1];
-                const groundY = groundPoint.y;
-                craters.push({
-                    x: x,
-                    y: groundY + 15 + Math.random() * 80,
-                    radiusX: 10 + Math.random() * 40,
-                    radiusY: 4 + Math.random() * 12,
-                    alpha: 0.1 + Math.random() * 0.2
-                });
+                const x = Math.random() * width; const groundPoint = terrain.find(p => p.x > x) || terrain[terrain.length - 1];
+                craters.push({ x: x, y: groundPoint.y + 15 + Math.random() * 80, radiusX: 10 + Math.random() * 40, radiusY: 4 + Math.random() * 12, alpha: 0.1 + Math.random() * 0.2 });
             }
         }
 
         function generateCosmeticObjects() {
             backgroundObjects = [];
-            for (let i = 0; i < 2; i++) {
+            for (let i = 0; i < 2; i++) backgroundObjects.push({ type: 'Eagle', x: Math.random() * width, y: height - 400 - Math.random() * 100, size: 0.35, speed: 25 + Math.random() * 15, direction: Math.random() > 0.5 ? 1 : -1, alpha: 0.8, tilt: 0, isGrounded: false });
+            for (let i = 0; i < 3; i++) backgroundObjects.push({ type: 'Buggy', x: (width * 0.1) + Math.random() * (width * 0.8), y: 0, size: 0.6, speed: 6 + Math.random() * 4, direction: Math.random() > 0.5 ? 1 : -1, alpha: 0.8, angle: 0, isGrounded: true });
+            // Radar Station
+            if (pads.length >= 2) {
+                const pad1Center = (pads[0].x1 + pads[0].x2) / 2;
+                const pad2Center = (pads[1].x1 + pads[1].x2) / 2;
+                const midPointX = (pad1Center + pad2Center) / 2;
+
+                // Spawn 1 Radar Station at exactly the midpoint
                 backgroundObjects.push({
-                    type: 'Eagle', x: Math.random() * width, y: height - 400 - Math.random() * 100,
-                    size: 0.35, speed: 25 + Math.random() * 15, direction: Math.random() > 0.5 ? 1 : -1,
-                    alpha: 0.8, tilt: 0, isGrounded: false
-                });
-            }
-            for (let i = 0; i < 3; i++) {
-                backgroundObjects.push({
-                    type: 'Buggy', x: (width * 0.1) + Math.random() * (width * 0.8), y: 0,
-                    size: 0.6, speed: 6 + Math.random() * 4, direction: Math.random() > 0.5 ? 1 : -1,
-                    alpha: 0.8, angle: 0, isGrounded: true
+                    type: 'Radar',
+                    x: midPointX,
+                    y: 0, // isGrounded logic handles the Y and Angle automatically
+                    size: 1.0,
+                    speed: 0,
+                    direction: 1,
+                    alpha: 0.8,
+                    angle: 0,
+                    isGrounded: true
                 });
             }
         }
 
         function deploySatellites() {
             if (gameOver || satInventory <= 0 || splashActive) return;
+            if (satellites.length >= 300) { satInventory = 0; uiState.milestone = "CONSTELLATION AT CAPACITY"; return; }
             playSound('deploy'); doorOpen = true; satInventory -= 10; totalDeployed += 10;
             for (let i = 0; i < 10; i++) satellites.push({ x: ship.x, y: ship.y, vx: ship.xv + (Math.random() - 0.5) * 2, vy: ship.yv + (Math.random() - 0.5) * 2, size: 4, opacity: 1.0, heat: 0, vaporizeAlt: height - (300 + Math.random() * 150) });
         }
 
         function triggerExplosion(x, y) {
-            if (audioCtx) playSound('sep');
-            for (let i = 0; i < 20; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160, life: 0.5, size: 2, plasma: true });            
+            if (audioCtx) playSound('crash');
+            for (let i = 0; i < 20; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160, life: 0.5, size: 2, plasma: true });
             for (let i = 0; i < 10; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 60, vy: (Math.random() - 0.5) * 60, life: 1.0, size: 5, plasma: true });
             for (let i = 0; i < 3; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20, life: 2.0, size: 25, plasma: true });
         }
@@ -397,50 +298,114 @@
         function triggerSeparationSmoke(x, y) { for (let i = 0; i < 45; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 18, vy: (Math.random() - 0.5) * 18, life: 0.8, size: 3.5, plasma: false }); }
         function triggerLandingPuff(x, y) { for (let i = 0; i < 35; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 15, vy: (Math.random() - 0.5) * 10 - 5, life: 1.2, size: 4.5, plasma: false, isOrange: true }); }
 
-        function drawGaugeDual(id, val1, val2, max1, max2) {
-            const el = document.getElementById(id); if (!el) return;
-            const gCtx = el.getContext('2d'); const cx = 40, cy = 40;
-            gCtx.clearRect(0, 0, 80, 80); gCtx.strokeStyle = '#1a1a1a'; gCtx.lineWidth = 4;
-            gCtx.beginPath(); gCtx.arc(cx, cy, 35, 0, Math.PI * 2); gCtx.stroke(); gCtx.beginPath(); gCtx.arc(cx, cy, 28, 0, Math.PI * 2); gCtx.stroke();
-            gCtx.font = 'bold 16px monospace'; gCtx.textAlign = 'center'; gCtx.fillStyle = '#00ffff'; gCtx.fillText(Math.round(val1), cx, cy - 5);
-            gCtx.fillStyle = '#ffffff'; gCtx.fillText(Math.round(val2), cx, cy + 13);
-            if (id === 'gauge-hspd') { const angle = -Math.PI / 2 + (Math.PI * 2 * (ORBITAL_VELOCITY / max1)); gCtx.strokeStyle = '#ff00ff'; gCtx.lineWidth = 2; gCtx.beginPath(); gCtx.moveTo(cx + 32 * Math.cos(angle), cy + 32 * Math.sin(angle)); gCtx.lineTo(cx + 39 * Math.cos(angle), cy + 39 * Math.sin(angle)); gCtx.stroke(); }
-            if (id === 'gauge-alt') { const targetAltVal = pads[0] ? pads[0].y - TARGET_ALT_Y : height; const angle = -Math.PI / 2 + (Math.PI * 2 * (targetAltVal / max1)); gCtx.strokeStyle = '#ffff00'; gCtx.lineWidth = 2; gCtx.beginPath(); gCtx.moveTo(cx + 32 * Math.cos(angle), cy + 32 * Math.sin(angle)); gCtx.lineTo(cx + 39 * Math.cos(angle), cy + 39 * Math.sin(angle)); gCtx.stroke(); }
-            gCtx.strokeStyle = '#00ffff'; gCtx.beginPath(); gCtx.arc(cx, cy, 35, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * Math.min(Math.abs(val1) / max1, 1))); gCtx.stroke();
-            gCtx.strokeStyle = '#ffffff'; gCtx.beginPath(); gCtx.arc(cx, cy, 28, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * Math.min(Math.abs(val2) / max2, 1))); gCtx.stroke();
+        // --- NEW BITMAP HUD DRAWING LOGIC ---
+        function renderGaugeDualToHUD(ctx, x, y, val1, val2, max1, max2, label, type) {
+            const cx = x + 40, cy = y + 40;
+            ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.arc(cx, cy, 35, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI * 2); ctx.stroke();
+            ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#00ffff'; ctx.fillText(Math.round(val1), cx, cy - 18);
+            ctx.fillStyle = '#ffffff'; ctx.fillText(Math.round(val2), cx, cy + 2);
+            if (type === 'hspd') { const angle = -Math.PI / 2 + (Math.PI * 2 * (ORBITAL_VELOCITY / max1)); ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + 32 * Math.cos(angle), cy + 32 * Math.sin(angle)); ctx.lineTo(cx + 39 * Math.cos(angle), cy + 39 * Math.sin(angle)); ctx.stroke(); }
+            if (type === 'alt') { const targetAltVal = pads[0] ? pads[0].y - TARGET_ALT_Y : height; const angle = -Math.PI / 2 + (Math.PI * 2 * (targetAltVal / max1)); ctx.strokeStyle = '#ffff00'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + 32 * Math.cos(angle), cy + 32 * Math.sin(angle)); ctx.lineTo(cx + 39 * Math.cos(angle), cy + 39 * Math.sin(angle)); ctx.stroke(); }
+            ctx.strokeStyle = '#00ffff'; ctx.beginPath(); ctx.arc(cx, cy, 35, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * Math.min(Math.abs(val1) / max1, 1))); ctx.stroke();
+            ctx.strokeStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cx, cy, 28, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * Math.min(Math.abs(val2) / max2, 1))); ctx.stroke();
+            ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#666'; ctx.fillText(label, cx, cy + 60);
         }
 
-        function drawBandwidthGauge(mbps) {
-            const el = document.getElementById('gauge-bandwidth'); if (!el) return;
-            const gCtx = el.getContext('2d'); const cx = 40, cy = 40;
-            gCtx.clearRect(0, 0, 80, 80);
-            gCtx.strokeStyle = '#1a1a1a'; gCtx.lineWidth = 6;
-            gCtx.beginPath(); gCtx.arc(cx, cy, 32, Math.PI * 0.8, Math.PI * 2.2); gCtx.stroke();
-            const pct = Math.min(mbps / 200, 1);
-            const grad = gCtx.createLinearGradient(0, 40, 80, 40); grad.addColorStop(0, '#ff00ff'); grad.addColorStop(1, '#00ffff');
-            gCtx.strokeStyle = grad; gCtx.beginPath(); gCtx.arc(cx, cy, 32, Math.PI * 0.8, Math.PI * 0.8 + (Math.PI * 1.4 * pct)); gCtx.stroke();
-            const needleAngle = Math.PI * 0.8 + (Math.PI * 1.4 * pct);
-            gCtx.strokeStyle = '#fff'; gCtx.lineWidth = 2; gCtx.beginPath(); gCtx.moveTo(cx, cy); gCtx.lineTo(cx + Math.cos(needleAngle) * 30, cy + Math.sin(needleAngle) * 30); gCtx.stroke();
-            gCtx.font = 'bold 15px monospace'; gCtx.fillStyle = '#ff00ff'; gCtx.textAlign = 'center'; gCtx.fillText(Math.floor(mbps), cx, cy + 12);
-            gCtx.font = '12px monospace'; gCtx.fillText("MBPS", cx, cy + 25);
+        function drawHUD() {
+            const hY = virtualPlayHeight;
+            vCtx.fillStyle = 'rgba(10, 10, 10, 0.95)'; vCtx.fillRect(0, hY, virtualWidth, virtualHUDHeight);
+            vCtx.strokeStyle = '#333'; vCtx.lineWidth = 1; vCtx.beginPath(); vCtx.moveTo(0, hY); vCtx.lineTo(virtualWidth, hY); vCtx.stroke();
+
+            // 1. Instructions
+            vCtx.fillStyle = '#888'; vCtx.font = '18px sans-serif'; vCtx.textAlign = 'left'; vCtx.textBaseline = 'top';
+            vCtx.fillText("ARROWS: THRUST & ROTATION", 30, hY + 25);
+            vCtx.fillText("S KEY: STAGE SEPARATION", 30, hY + 50);
+            vCtx.fillText("D KEY: DEPLOY SATELLITES!", 30, hY + 75);
+            vCtx.fillText("A KEY: AUTO LAND ENABLE", 30, hY + 100);
+
+            // 2. Inventory
+            vCtx.textAlign = 'center'; vCtx.fillStyle = '#00ffff'; vCtx.font = 'bold 32px monospace';
+            vCtx.fillText(satInventory, 460, hY + 40);
+            vCtx.font = 'bold 10px sans-serif'; vCtx.fillStyle = '#666'; vCtx.fillText("SATS REMAINING", 460, hY + 95);
+
+            // 3. Gauges
+            renderGaugeDualToHUD(vCtx, 550, hY + 20, ship.xv, booster.xv, 80, 80, "HORIZONTAL SPD", 'hspd');
+            renderGaugeDualToHUD(vCtx, 680, hY + 20, ship.yv, booster.yv, 60, 60, "VERTICAL SPD", null);
+            const padS = pads.find(p => p.owner === 'Ship') || { y: height }; const padB = pads.find(p => p.owner === 'Booster') || { y: height };
+            renderGaugeDualToHUD(vCtx, 810, hY + 20, padS.y - (ship.y + 25), padB.y - (booster.y + 25), height, height, "ALTITUDE", 'alt');
+
+            // 4. Payload Zone
+            vCtx.strokeStyle = uiState.payloadInZone ? '#0f0' : '#444'; vCtx.lineWidth = 2;
+            vCtx.beginPath(); vCtx.arc(980, hY + 60, 40, 0, Math.PI * 2); vCtx.stroke();
+            vCtx.fillStyle = uiState.payloadInZone ? '#0f0' : '#666'; vCtx.font = 'bold 12px sans-serif';
+            vCtx.fillText(uiState.payloadText, 980, hY + 50);
+            vCtx.fillStyle = '#666'; vCtx.fillText("PAYLOAD ZONE", 980, hY + 115);
+
+            // 5. Fuel
+            renderGaugeDualToHUD(vCtx, 1070, hY + 20, ship.fuel, booster.fuel, 500, 500, "PROPELLANT", null);
+
+            // 6. Mission Time
+            vCtx.fillStyle = '#00ffff'; vCtx.font = '16px monospace';
+            vCtx.fillText(uiState.timer, 1220, hY + 65);
+            vCtx.font = 'bold 10px sans-serif'; vCtx.fillStyle = '#666'; vCtx.fillText("MISSION TIME", 1220, hY + 115);
+
+            // 7. Auto Land
+            const active = ship.autopilot; vCtx.strokeStyle = active ? '#0f0' : '#333'; vCtx.lineWidth = 4;
+            vCtx.beginPath(); vCtx.arc(1340, hY + 60, 35, 0, Math.PI * 2); vCtx.stroke();
+            vCtx.fillStyle = active ? `rgba(0, 255, 0, ${0.3 + Math.sin(pulseAngle) * 0.2})` : '#111';
+            vCtx.beginPath(); vCtx.arc(1340, hY + 60, 15, 0, Math.PI * 2); vCtx.fill();
+            vCtx.fillStyle = '#fff'; vCtx.font = '10px Arial'; vCtx.fillText(active ? "AUTO" : "MANUAL", 1340, hY + 65);
+            vCtx.fillStyle = '#666'; vCtx.fillText("AUTOLAND [A]", 1340, hY + 115);
+
+            // 8. Network Ops
+            const cxB = 1480, cyB = hY + 60; vCtx.strokeStyle = '#1a1a1a'; vCtx.lineWidth = 6;
+            vCtx.beginPath(); vCtx.arc(cxB, cyB, 32, Math.PI * 0.8, Math.PI * 2.2); vCtx.stroke();
+            const pct = Math.min(uiState.mbps / 200, 1);
+            const grad = vCtx.createLinearGradient(cxB - 40, cyB, cxB + 40, cyB); grad.addColorStop(0, '#ff00ff'); grad.addColorStop(1, '#00ffff');
+            vCtx.strokeStyle = grad; vCtx.beginPath(); vCtx.arc(cxB, cyB, 32, Math.PI * 0.8, Math.PI * 0.8 + (Math.PI * 1.4 * pct)); vCtx.stroke();
+            vCtx.fillStyle = '#ff00ff'; vCtx.font = 'bold 15px monospace'; vCtx.fillText(Math.floor(uiState.mbps), cxB, cyB + 12);
+            vCtx.font = '12px monospace'; vCtx.fillText("MBPS", cxB, cyB + 25); vCtx.fillStyle = '#666'; vCtx.font = 'bold 10px sans-serif'; vCtx.fillText("BANDWIDTH", cxB, hY + 115);
+
+            vCtx.textAlign = 'left'; vCtx.fillStyle = '#ff00ff'; vCtx.font = 'bold 20px monospace';
+            vCtx.fillText(`SATS: ${uiState.satCount}`, 1600, hY + 50);
+            vCtx.font = '14px monospace'; vCtx.fillText(uiState.milestone, 1600, hY + 75);
+            vCtx.fillStyle = '#666'; vCtx.font = 'bold 10px sans-serif'; vCtx.fillText("NETWORK OPS", 1600, hY + 115);
         }
 
         function runAI(obj, dt) {
-            if (splashActive) return; let fuelTarget = (obj === ship && !separated) ? booster : obj;
+            if (splashActive) return;
+            let fuelTarget = (obj === ship && !separated) ? booster : obj;
             if (fuelTarget.fuel <= 0 || obj.landed || obj.crashed) { obj.thrusting = false; return; }
             const myPad = pads.find(p => p.owner === obj.id); if (!myPad) return;
-            const dx = ((myPad.x1 + myPad.x2) / 2) - obj.x; const xvError = (dx * 0.26) - (obj.xv * 1.0);
-            let targetAngle = -Math.PI / 2 + (xvError * 0.05); targetAngle = Math.max(-Math.PI / 2 - 0.85, Math.min(-Math.PI / 2 + 0.85, targetAngle));
+            const padCenterX = (myPad.x1 + myPad.x2) / 2;
+            const dx = padCenterX - obj.x; const xvError = (dx * 0.26) - (obj.xv * 0.9);
+            let targetAngle = -Math.PI / 2 + (xvError * 0.05);
+            targetAngle = Math.max(-Math.PI / 2 - 0.85, Math.min(-Math.PI / 2 + 0.85, targetAngle));
             const angleErr = targetAngle - obj.angle; const rotStep = MAX_ROT_SPEED * dt;
             if (Math.abs(angleErr) < rotStep) obj.angle = targetAngle; else obj.angle += Math.sign(angleErr) * rotStep;
-            const targetOffset = (obj.id === 'Booster' && separated) ? 36 : 25; const altitude = myPad.y - (obj.y + targetOffset);
-            let targetYv = Math.sqrt(Math.max(0, altitude) * 3.5) + 12; if (targetYv > 45) targetYv = 45;
-            if (obj.yv > targetYv) { obj.xv += (Math.cos(obj.angle) * THRUST) * dt; obj.yv += (Math.sin(obj.angle) * THRUST) * dt; if (obj === ship && !separated) booster.fuel -= 50 * dt; else obj.fuel -= 50 * dt; obj.thrusting = true; }
+            const targetOffset = (obj.id === 'Booster' && separated) ? 36 : 25;
+            const altitude = myPad.y - (obj.y + targetOffset);
+            let targetYv = (altitude < 40 && Math.abs(dx) > 35) ? -2 : Math.sqrt(Math.max(0, altitude) * 5.0) + 7;
+            if (targetYv > 80) targetYv = 80;
+            if (obj.yv > targetYv + 1) { obj.xv += (Math.cos(obj.angle) * THRUST) * dt; obj.yv += (Math.sin(obj.angle) * THRUST) * dt; if (obj === ship && !separated) booster.fuel -= 50 * dt; else obj.fuel -= 50 * dt; obj.thrusting = true; }
             else obj.thrusting = false;
         }
 
         function update(time) {
-            const dt = Math.min((time - lastTime) / 1000, 0.1) * TIME_SCALE; lastTime = time;
+            if (!lastTime) lastTime = time;
+            const dt = Math.min((time - lastTime) / 1000, 0.1) * TIME_SCALE;
+            lastTime = time;
+
+            if (gameOver || splashActive) {
+                timeSinceGameOver += (dt * 1000);
+                if (timeSinceGameOver > 5000) { resetGame(); gameOver = false; splashActive = false; timeSinceGameOver = 0; }
+                if (splashActive) { draw(); requestAnimationFrame(update); return; }
+            }
+
+            demoUpdate();
+
             if (!gameOver && !splashActive) {
                 if (ship.autopilot) runAI(ship, dt); if (separated && booster.autopilot) runAI(booster, dt);
                 if (!separated && !ship.autopilot) {
@@ -459,91 +424,61 @@
                     if (!booster.landed && !booster.crashed) { booster.yv += GRAVITY * dt; booster.x += booster.xv * dt; booster.y += booster.yv * dt; checkColl(booster); }
                 }
 
-                if (booster.y > height - HUD_HEIGHT + 20 || booster.x < -LOST_BUFFER || booster.x > width + LOST_BUFFER || booster.y < -LOST_BUFFER) { booster.crashed = true; ship.crashed = true;}
-                if (ship.y > height - HUD_HEIGHT + 20 || ship.x < -LOST_BUFFER || ship.x > width + LOST_BUFFER || ship.y < -LOST_BUFFER) { ship.crashed = true; booster.crashed = true;}
+                checkEagleColl(ship); checkEagleColl(booster);
 
-                if (!ship.thrusting && !separated && Math.abs(ship.yv) < 0.1 && Math.random() > 0.9) {
+                if (booster.y > height + 20 || booster.x < -LOST_BUFFER || booster.x > width + LOST_BUFFER || booster.y < -LOST_BUFFER) { booster.crashed = true; ship.crashed = true; }
+                if (ship.y > height + 20 || ship.x < -LOST_BUFFER || ship.x > width + LOST_BUFFER || ship.y < -LOST_BUFFER) { ship.crashed = true; booster.crashed = true; }
+
+                // --- RESTORED SMOKE GENERATOR (THRUST) ---
+                [ship, booster].forEach(obj => { if (obj.exploded) return; const activeThrust = !separated ? (obj === booster && ship.thrusting) : obj.thrusting; const yOff = (obj === booster) ? 36 : 30; if (activeThrust && !obj.landed && Math.random() > 0.2) smokeTrail.push({ x: obj.x + Math.cos(obj.angle + Math.PI) * yOff, y: obj.y + Math.sin(obj.angle + Math.PI) * yOff, vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5, life: 1, size: 2.5 }); });
+
+                // --- RESTORED PRE-LAUNCH VENTING ---
+                // --- DYNAMIC PRE-LAUNCH VENTING ---
+                // Calculate altitude specifically above the launch pad
+                const altAboveStart = launchPad.y - (ship.y + 69);
+
+                // Trigger venting if the ship is within 50px of the pad and hasn't separated yet
+                if (!separated && altAboveStart < 50 && altAboveStart > -10 && Math.random() > 0.9) {
                     smokeTrail.push({
-                        x: ship.x + 7, y: ship.y + 18,
-                        vx: 3 + Math.random() * 3, vy: -0.5 + Math.random(),
-                        life: 0.8, size: 1.0, plasma: false, isOrange: false
+                        x: ship.x + 7,
+                        y: ship.y + 18,
+                        vx: 3 + Math.random() * 3,
+                        vy: -0.5 + Math.random(),
+                        life: 0.8,
+                        size: 1.0,
+                        plasma: false,
+                        isOrange: false
                     });
                 }
 
                 [ship, booster].forEach(obj => { if (obj.crashed && !obj.exploded) { triggerExplosion(obj.x, obj.y); obj.exploded = true; } });
+
                 if ((separated && (ship.landed || ship.crashed) && (booster.landed || booster.crashed)) || (!separated && (ship.landed || ship.crashed))) {
-                    gameOver = true; const landSuccess = ship.landed && (separated ? booster.landed : true);
-                    const win = landSuccess && totalDeployed > 0;
-                    if (win) { msgBox.innerHTML = `MISSION SUCCESS<br><span style='font-size:16px; color:#fff;'>RECOVERY COMPLETE</span>`; playSound('success'); } else { msgBox.innerHTML = "MISSION FAILURE"; }
-                    msgBox.style.color = win ? "#0f0" : "#f00"; msgBox.style.display = "block"; setTimeout(() => init(false, true), 5500);
+                    if (!gameOver) {
+                        gameOver = true; timeSinceGameOver = 0; const landSuccess = ship.landed && (separated ? booster.landed : true); const win = landSuccess && totalDeployed > 0;
+                        if (win) { msgBox.innerHTML = `MISSION SUCCESS<br><span style='font-size:16px; color:#fff;'>RECOVERY COMPLETE</span>`; playSound('success'); } else { msgBox.innerHTML = "MISSION FAILURE"; }
+                        msgBox.style.color = win ? "#0f0" : "#f00"; msgBox.style.display = "block";
+                    }
                 }
             }
 
-            if (!splashActive) {
-                [ship, booster].forEach(obj => {
-                    if ((obj.landed || obj.yv === 0) && !obj.crashed && !obj.exploded) {
-                        const targetAngle = -Math.PI / 2;
-                        let angleDiff = targetAngle - obj.angle;
-                        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                        if (Math.abs(angleDiff) > 0.001) obj.angle += angleDiff * 4.5 * dt;
-                        else obj.angle = targetAngle;
-                    }
-                });
-            }
-
+            if (!splashActive) { [ship, booster].forEach(obj => { if ((obj.landed || obj.yv === 0) && !obj.crashed && !obj.exploded) { const targetAngle = -Math.PI / 2; let angleDiff = targetAngle - obj.angle; while (angleDiff < -Math.PI) angleDiff += Math.PI * 2; while (angleDiff > Math.PI) angleDiff -= Math.PI * 2; if (Math.abs(angleDiff) > 0.001) obj.angle += angleDiff * 4.5 * dt; else obj.angle = targetAngle; } }); }
             if (audioCtx) { const anyThrusting = ship.thrusting || (separated && booster.thrusting); const bothLanded = separated ? (ship.landed && booster.landed) : ship.landed; setEngineVolume((anyThrusting && !bothLanded && !gameOver) ? 1.0 : 0); }
-
             if (!splashActive) {
+                handleEagleEvasion();
                 backgroundObjects.forEach(obj => {
                     obj.x += obj.speed * obj.direction * dt;
                     if (obj.isGrounded) {
                         const p1 = terrain.find(p => p.x > obj.x);
-                        if (p1) {
-                            const pIndex = terrain.indexOf(p1);
-                            const p0 = terrain[pIndex - 1] || terrain[0];
-                            const pct = (obj.x - p0.x) / (p1.x - p0.x);
-                            obj.y = p0.y + (p1.y - p0.y) * pct - 5;
-                            obj.angle = Math.atan2(p1.y - p0.y, p1.x - p0.x);
-                        }
-                    }
-                    if (obj.x < 0) obj.direction = 1; if (obj.x > width) obj.direction = -1;
-                    if (obj.type === 'Eagle' && Math.random() > 0.8) {
-                        const engineX = obj.x + (70 * obj.size * (obj.direction * -1));
-                        smokeTrail.push({
-                            x: engineX, y: obj.y,
-                            vx: (Math.random() - 0.5) * 2 - (obj.direction * 2),
-                            vy: (Math.random() - 0.5) * 2,
-                            life: 0.3, size: 1.2, plasma: false, isOrange: false
-                        });
-                    }
-                });
-                cosmeticObjPulse += 0.05;
+                        if (p1) { const p0 = terrain[terrain.indexOf(p1) - 1] || terrain[0]; const pct = (obj.x - p0.x) / (p1.x - p0.x); obj.y = p0.y + (p1.y - p0.y) * pct - 5; obj.angle = Math.atan2(p1.y - p0.y, p1.x - p0.x); }
+                    } if (obj.x < 0) obj.direction = 1; if (obj.x > width) obj.direction = -1; if (obj.type === 'Eagle' && !obj.crashed && Math.random() > 0.8) { smokeTrail.push({ x: obj.x + (70 * obj.size * (obj.direction * -1)), y: obj.y, vx: (Math.random() - 0.5) * 2 - (obj.direction * 2), vy: (Math.random() - 0.5) * 2, life: 0.3, size: 1.2, plasma: false, isOrange: false }); }
+                }); cosmeticObjPulse += 0.05;
             }
-
             legacySats.forEach((s) => { const altDiff = TARGET_ALT_Y - s.y; if (Math.abs(altDiff) < 150) s.vy += altDiff * 0.01 * dt; s.x += s.vx * dt; s.y += s.vy * dt; if (s.x > width + 50) s.x = -50; });
+            for (let i = satellites.length - 1; i >= 0; i--) { const s = satellites[i]; const altDiff = TARGET_ALT_Y - s.y; if (Math.abs(altDiff) < 200) s.vy += (altDiff * 0.005 - s.vy * 0.125) * dt; if (s.y > TARGET_ALT_Y + ALT_ENVELOPE) { s.vy += 12 * dt; s.heat += 0.5 * dt; } s.x += s.vx * dt; s.y += s.vy * dt; if (s.y > s.vaporizeAlt) { for (let j = 0; j < 10; j++) smokeTrail.push({ x: s.x, y: s.y, vx: (Math.random() - 0.5) * 15, vy: (Math.random() - 0.5) * 15, life: 0.5, size: 2, plasma: true }); satellites.splice(i, 1); continue; } if (s.x > width + 100) s.x = -100; else if (s.x < -100) s.x = width + 100; }
+            smokeTrail.forEach((p, i) => { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= (p.plasma ? 0.8 : (p.isOrange ? 1.0 : 0.2)) * dt; p.size += (p.plasma ? 3.0 : 5) * dt; if (p.life <= 0) smokeTrail.splice(i, 1); });
 
-            for (let i = satellites.length - 1; i >= 0; i--) {
-                const s = satellites[i];
-                const altDiff = TARGET_ALT_Y - s.y;
-                if (Math.abs(altDiff) < 200) s.vy += (altDiff * 0.005 - s.vy * 0.125) * dt;
-                if (s.y > TARGET_ALT_Y + ALT_ENVELOPE) { s.vy += 12 * dt; s.heat += 0.5 * dt; }
-                s.vx += (Math.random() - 0.5) * 2.0 * dt;
-                s.x += s.vx * dt; s.y += s.vy * dt;
-                if (s.y > s.vaporizeAlt) {
-                    for (let j = 0; j < 10; j++) {
-                        smokeTrail.push({ x: s.x, y: s.y, vx: (Math.random() - 0.5) * 15, vy: (Math.random() - 0.5) * 15, life: 0.5, size: 2, plasma: true });
-                    }
-                    satellites.splice(i, 1);
-                    continue;
-                }
-                if (s.x > width + 100) s.x = -100; else if (s.x < -100) s.x = width + 100;
-                if (s.y < -500) satellites.splice(i, 1);
-            }
-
-            [ship, booster].forEach(obj => { if (obj.exploded) return; const activeThrust = !separated ? (obj === booster && ship.thrusting) : obj.thrusting; const yOff = (obj === booster) ? 36 : 30; if (activeThrust && !obj.landed && Math.random() > 0.2) smokeTrail.push({ x: obj.x + Math.cos(obj.angle + Math.PI) * yOff, y: obj.y + Math.sin(obj.angle + Math.PI) * yOff, vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5, life: 1, size: 2.5 }); });
-            smokeTrail.forEach((p, i) => { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= (p.plasma ? 0.4 : (p.isOrange ? 0.5 : 0.1)) * dt; p.size += (p.plasma ? 3.0 : 5) * dt; if (p.life <= 0) smokeTrail.splice(i, 1); });
-            updateUI(time); draw(); animationId = requestAnimationFrame(update);
+            updateUI(time); draw(); lastTime = performance.now(); animationId = requestAnimationFrame(update);
         }
 
         function checkColl(obj) {
@@ -562,55 +497,125 @@
             }
         }
 
-        function updateUI(time) {
-            const elapsed = Math.floor((time - missionStart) / 1000); timerBox.innerText = splashActive ? "T- 00:00" : `T+ ${Math.floor(elapsed / 60).toString().padStart(2, '0')}:${(elapsed % 60).toString().padStart(2, '0')}`;
-            invHUD.innerText = satInventory; drawGaugeDual('gauge-hspd', ship.xv, booster.xv, 80, 80); drawGaugeDual('gauge-vspd', ship.yv, booster.yv, 60, 60);
-            const padS = pads.find(p => p.owner === 'Ship') || { y: height }; const padB = pads.find(p => p.owner === 'Booster') || { y: height };
-            drawGaugeDual('gauge-alt', padS.y - (ship.y + 25), padB.y - (booster.y + 25), height, height);
-            drawGaugeDual('gauge-fuel', ship.fuel, booster.fuel, 500, 500);
-            const finalInZone = Math.abs(ship.y - TARGET_ALT_Y) < ALT_ENVELOPE && Math.abs(ship.xv - ORBITAL_VELOCITY) < VELOCITY_TOLERANCE;
-            payloadHUD.innerText = finalInZone ? "IN ZONE" : "OUTSIDE"; payloadHUD.style.borderColor = finalInZone ? "#0f0" : "#444"; payloadHUD.style.color = finalInZone ? "#0f0" : "#666";
-            const count = satellites.filter(s => Math.abs(s.y - TARGET_ALT_Y) < ALT_ENVELOPE).length;
-            const mbps = count * 0.95; constellationHUD.innerText = `SATS: ${count}`;
-            let milestone = "OFFLINE: NO CONSTELLATION";
-            if (count > 0 && count < 10) milestone = "BBS REACHED: 14.4K DIAL-UP";
-            else if (count < 30) milestone = "AOL 2.5 ACHIEVED: WELCOME!";
-            else if (count < 60) milestone = "NETSCAPE NAVIGATOR: THE WEB IS BORN";
-            else if (count < 100) milestone = "NAPSTER PEER-2-PEER: SHARING FILE";
-            else if (count < 150) milestone = "GEOCITIES LIVE: MY HOME PAGE";
-            else if (count < 200) milestone = "HAMSTER DANCE 4K: DANCE NOW";
-            else if (count >= 200) milestone = "MODERN WEB: UNSTABLE (LAGGY)";
-            milestoneHUD.innerText = milestone;
-            drawBandwidthGauge(mbps);
-            const gAutoEl = document.getElementById('gauge-auto');
-            if (gAutoEl) {
-                const gAuto = gAutoEl.getContext('2d'); gAuto.clearRect(0, 0, 80, 80); const active = ship.autopilot; gAuto.strokeStyle = active ? '#0f0' : '#333'; gAuto.lineWidth = 4; gAuto.beginPath(); gAuto.arc(40, 40, 35, 0, Math.PI * 2); gAuto.stroke(); gAuto.fillStyle = active ? `rgba(0, 255, 0, ${0.3 + Math.sin(pulseAngle) * 0.2})` : '#111'; gAuto.beginPath(); gAuto.arc(40, 40, 15, 0, Math.PI * 2); gAuto.fill(); gAuto.fillStyle = '#fff'; gAuto.font = '10px Arial'; gAuto.textAlign = 'center'; gAuto.textBaseline = 'middle'; gAuto.fillText(active ? "AUTO" : "MANUAL", 40, 40); pulseAngle += 0.1;
-            }
+        function checkEagleColl(obj) {
+            if (obj.landed || obj.crashed) return;
+            backgroundObjects.forEach(bk => {
+                if (bk.type === "Eagle" && !bk.crashed) {
+                    const wS = EAGLE_WIDTH / 180, hS = EAGLE_HEIGHT / 64, eSize = bk.size;
+                    const eLeft = bk.x - (100 * wS * eSize), eRight = bk.x + (80 * wS * eSize), eTop = bk.y - (25 * hS * eSize) - 10, eBottom = bk.y + (39 * hS * eSize) + 10;
+                    const oLeft = obj.x - obj.width / 2, oRight = obj.x + obj.width / 2, oTop = obj.y - obj.height / 2, oBottom = obj.y + obj.height / 2;
+                    if (oLeft < eRight && oRight > eLeft && oTop < eBottom && oBottom > eTop) { bk.crashed = true; obj.crashed = true; booster.autopilot = true; separated = true; for (let i = 0; i < 10; i++) smokeTrail.push({ x: bk.x, y: bk.y, vx: bk.speed * bk.direction * (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * -160, life: 1, size: .25, plasma: true }); if (audioCtx) playSound('sep'); }
+                }
+            });
         }
 
-        function drawCosmeticEagle(obj, alpha) {
-            ctx.save(); ctx.translate(obj.x, obj.y);
+        function updateUI(time) {
+            const elapsed = Math.floor((time - missionStart) / 1000);
+            uiState.timer = splashActive ? "T- 00:00" : `T+ ${Math.floor(elapsed / 60).toString().padStart(2, '0')}:${(elapsed % 60).toString().padStart(2, '0')}`;
+            const inZone = Math.abs(ship.y - TARGET_ALT_Y) < ALT_ENVELOPE && Math.abs(ship.xv - ORBITAL_VELOCITY) < VELOCITY_TOLERANCE;
+            uiState.payloadText = inZone ? "IN ZONE" : "OUTSIDE"; uiState.payloadInZone = inZone;
+            const count = satellites.filter(s => Math.abs(s.y - TARGET_ALT_Y) < ALT_ENVELOPE).length;
+            uiState.satCount = count; uiState.mbps = count * 0.95;
+            let ms = "OFFLINE: NO CONSTELLATION";
+            if (count > 0 && count < 10) ms = "BBS REACHED: 14.4K DIAL-UP";
+            else if (count < 30) ms = "AOL 2.5 ACHIEVED: WELCOME!";
+            else if (count < 60) ms = "NETSCAPE NAVIGATOR: THE WEB IS BORN";
+            else if (count < 100) ms = "NAPSTER PEER-2-PEER: SHARING FILE";
+            else if (count < 150) ms = "GEOCITIES LIVE: MY HOME PAGE";
+            else if (count < 200) ms = "HAMSTER DANCE 4K: DANCE NOW";
+            else if (count >= 200) ms = "MODERN WEB: UNSTABLE (LAGGY)";
+            uiState.milestone = ms;
+            pulseAngle += 0.1;
+        }
+
+        // function drawCosmeticEagle(ctx, obj, alpha) {
+        //     if (obj.crashed) return;
+        //     ctx.save(); ctx.translate(obj.x, obj.y); ctx.scale(obj.size * (obj.direction * -1), obj.size);
+        //     const wS = EAGLE_WIDTH / 180, hS = EAGLE_HEIGHT / 64;
+        //     ctx.fillStyle = `rgba(130,130,130, ${alpha})`; ctx.strokeStyle = `rgba(0,0,0, ${alpha})`; ctx.lineWidth = 2;
+        //     ctx.beginPath(); ctx.moveTo(-100 * wS, 0); ctx.lineTo(-80 * wS, -20 * hS); ctx.lineTo(-70 * wS, -20 * hS); ctx.lineTo(-60 * wS, -10 * hS); ctx.lineTo(-60 * wS, 10 * hS); ctx.lineTo(-70 * wS, 20 * hS); ctx.lineTo(-80 * wS, 20 * hS); ctx.closePath(); ctx.fill(); ctx.stroke();
+        //     ctx.fillStyle = `rgba(140,140,140, ${alpha})`; ctx.fillRect(-60 * wS, -20 * hS, 120 * wS, 40 * hS); ctx.strokeRect(-60 * wS, -20 * hS, 120 * wS, 40 * hS);
+        //     ctx.fillStyle = `rgba(50,50,60, ${alpha})`; for (let i = 0; i < 5; i++) { ctx.fillRect((-48 + (i * 22)) * wS, -5 * hS, 10 * wS, 10 * hS); }
+        //     ctx.strokeStyle = `rgba(80,80,80, ${alpha})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-60 * wS, -25 * hS); ctx.lineTo(60 * wS, -25 * hS); ctx.stroke();
+        //     for (let i = -50; i <= 50; i += 25) { ctx.beginPath(); ctx.moveTo(i * wS, -25 * hS); ctx.lineTo(i * wS, -20 * hS); ctx.stroke(); }
+        //     ctx.fillStyle = `rgba(130, 80, 40, ${alpha})`; ctx.beginPath(); ctx.moveTo(60 * wS, -10 * hS); ctx.lineTo(80 * wS, -15 * hS); ctx.lineTo(80 * wS, 15 * hS); ctx.lineTo(60 * wS, 10 * hS); ctx.closePath(); ctx.fill(); ctx.stroke();
+        //     ctx.strokeStyle = `rgba(110,110,110, ${alpha})`; ctx.lineWidth = 1.5;
+        //     [-52, -38, 38, 52].forEach(offset => { const oX = offset * wS, side = offset < 0 ? -1 : 1; ctx.beginPath(); ctx.moveTo(oX, 20 * hS); ctx.lineTo(oX + (side * 6 * wS), 36 * hS); ctx.stroke(); ctx.fillStyle = `rgba(80,80,80, ${alpha})`; ctx.fillRect(oX + (side < 0 ? -12 * wS : 0), 36 * hS, 12 * wS, 3 * hS); });
+        //     ctx.restore();
+        // }
+
+
+        function drawCosmeticEagle(ctx, obj, alpha) {
+            if (obj.crashed) return;
+
+            // Check if at least one radar station exists in the background
+            const hasRadar = backgroundObjects.some(o => o.type === 'Radar');
+
+            ctx.save();
+            ctx.translate(obj.x, obj.y);
             ctx.scale(obj.size * (obj.direction * -1), obj.size);
+
+            const wS = EAGLE_WIDTH / 180, hS = EAGLE_HEIGHT / 64;
             ctx.fillStyle = `rgba(130,130,130, ${alpha})`; ctx.strokeStyle = `rgba(0,0,0, ${alpha})`; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(-100, 0); ctx.lineTo(-80, -20); ctx.lineTo(-70, -20); ctx.lineTo(-60, -10); ctx.lineTo(-60, 10); ctx.lineTo(-70, 20); ctx.lineTo(-80, 20); ctx.closePath(); ctx.fill(); ctx.stroke();
-            ctx.fillStyle = `rgba(140,140,140, ${alpha})`; ctx.fillRect(-60, -20, 120, 40); ctx.strokeRect(-60, -20, 120, 40);
+
+            // Command Module
+            ctx.beginPath(); ctx.moveTo(-100 * wS, 0); ctx.lineTo(-80 * wS, -20 * hS); ctx.lineTo(-70 * wS, -20 * hS);
+            ctx.lineTo(-60 * wS, -10 * hS); ctx.lineTo(-60 * wS, 10 * hS); ctx.lineTo(-70 * wS, 20 * hS);
+            ctx.lineTo(-80 * wS, 20 * hS); ctx.closePath(); ctx.fill(); ctx.stroke();
+
+            // Passenger Module & Windows
+            ctx.fillStyle = `rgba(140,140,140, ${alpha})`; ctx.fillRect(-60 * wS, -20 * hS, 120 * wS, 40 * hS); ctx.strokeRect(-60 * wS, -20 * hS, 120 * wS, 40 * hS);
             ctx.fillStyle = `rgba(50,50,60, ${alpha})`;
-            for (let i = 0; i < 5; i++) { ctx.fillRect(-48 + (i * 22), -5, 10, 10); }
+            for (let i = 0; i < 5; i++) { ctx.fillRect((-48 + (i * 22)) * wS, -5 * hS, 10 * wS, 10 * hS); }
+
+            // Top Spine structure
             ctx.strokeStyle = `rgba(80,80,80, ${alpha})`; ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.moveTo(-60, -25); ctx.lineTo(60, -25); ctx.stroke();
-            for (let i = -50; i <= 50; i += 25) { ctx.beginPath(); ctx.moveTo(i, -25); ctx.lineTo(i, -20); ctx.stroke(); }
-            ctx.fillStyle = `rgba(130, 80, 40, ${alpha})`;
-            ctx.beginPath(); ctx.moveTo(60, -10); ctx.lineTo(80, -15); ctx.lineTo(80, 15); ctx.lineTo(60, 10); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(-60 * wS, -25 * hS); ctx.lineTo(60 * wS, -25 * hS); ctx.stroke();
+            for (let i = -50; i <= 50; i += 25) { ctx.beginPath(); ctx.moveTo(i * wS, -25 * hS); ctx.lineTo(i * wS, -20 * hS); ctx.stroke(); }
+
+            // --- NEW: RADAR-LINKED SIGNAL LIGHT ---
+            if (hasRadar) {
+                const blink = Math.sin(cosmeticObjPulse * 3) > 0;
+                ctx.fillStyle = blink ? `rgba(255, 0, 0, ${alpha})` : `rgba(50, 0, 0, ${alpha})`;
+                ctx.beginPath();
+                // y changed from -28 to 22 (bottom), radius changed from 3 to 6 (larger)
+                ctx.arc(0, 22 * hS, 6 * wS, 0, Math.PI * 2);
+                ctx.fill();
+                // Front Facing Radar Dish
+                ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.lineWidth = 2;
+                // Stem protruding from nose
+                ctx.beginPath();
+                ctx.moveTo(-100 * wS, -2 * hS);
+                ctx.lineTo(-110 * wS, -2 * hS);
+                ctx.stroke();
+                // Mini dish bowl
+                ctx.beginPath();
+                ctx.arc(-133 * wS, -2 * hS, 17 * hS, 1.5 * Math.PI, 0.5 * Math.PI);
+                ctx.stroke();
+
+
+
+
+            }
+
+            // Engine Section
+            ctx.fillStyle = `rgba(130, 80, 40, ${alpha})`; ctx.beginPath();
+            ctx.moveTo(60 * wS, -10 * hS); ctx.lineTo(80 * wS, -15 * hS); ctx.lineTo(80 * wS, 15 * hS);
+            ctx.lineTo(60 * wS, 10 * hS); ctx.closePath(); ctx.fill(); ctx.stroke();
+
+            // Landing Gear
             ctx.strokeStyle = `rgba(110,110,110, ${alpha})`; ctx.lineWidth = 1.5;
-            const legOffsets = [-52, -38, 38, 52];
-            legOffsets.forEach(offset => {
-                ctx.beginPath(); ctx.moveTo(offset, 20); ctx.lineTo(offset + (offset < 0 ? -6 : 6), 36); ctx.stroke();
-                ctx.fillStyle = `rgba(80,80,80, ${alpha})`; ctx.fillRect(offset + (offset < 0 ? -12 : 0), 36, 12, 3);
+            [-52, -38, 38, 52].forEach(offset => {
+                const oX = offset * wS, side = offset < 0 ? -1 : 1;
+                ctx.beginPath(); ctx.moveTo(oX, 20 * hS); ctx.lineTo(oX + (side * 6 * wS), 36 * hS); ctx.stroke();
+                ctx.fillStyle = `rgba(80,80,80, ${alpha})`; ctx.fillRect(oX + (side < 0 ? -12 * wS : 0), 36 * hS, 12 * wS, 3 * hS);
             });
+
             ctx.restore();
         }
 
-        function drawCosmeticBuggy(obj, alpha) {
+        function drawCosmeticBuggy(ctx, obj, alpha) {
             ctx.save(); ctx.translate(obj.x, obj.y); ctx.rotate(obj.angle); ctx.scale(obj.size, obj.size);
             ctx.fillStyle = `rgba(220,220,220, ${alpha})`; ctx.strokeStyle = `rgba(50,50,50, ${alpha})`; ctx.lineWidth = 1;
             ctx.fillRect(-12, -8, 24, 8); ctx.beginPath(); ctx.moveTo(5, -8); ctx.lineTo(8, -15); ctx.stroke();
@@ -618,7 +623,71 @@
             ctx.restore();
         }
 
-        function drawRocket(obj, type) {
+        function drawCosmeticRadarStation(ctx, obj, alpha) {
+            ctx.save();
+            ctx.translate(obj.x, obj.y);
+            //ctx.rotate(obj.angle); // Aligns with terrain slope
+            ctx.scale(obj.size, obj.size);
+
+            // 1. MAIN BUILDING (The Base)
+            ctx.fillStyle = `rgba(100, 100, 100, ${alpha})`;
+            ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
+            ctx.lineWidth = 1;
+            // Main hub
+            ctx.fillRect(-25, -20, 50, 20);
+            ctx.strokeRect(-25, -20, 50, 20);
+            // Paneling detail
+            ctx.fillStyle = `rgba(120, 120, 120, ${alpha})`;
+            ctx.fillRect(-15, -15, 10, 10);
+            ctx.fillRect(5, -15, 10, 10);
+
+            // 2. THE RADAR DISH
+            ctx.save();
+            ctx.translate(-12, -20);
+            // Gentle back-and-forth scanning motion
+            const scanTilt = Math.sin(cosmeticObjPulse * 0.5) * 0.5;
+            ctx.rotate(scanTilt - 0.4);
+
+            // Dish Support
+            ctx.strokeStyle = `rgba(80, 80, 80, ${alpha})`;
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -8); ctx.stroke();
+
+            // The Dish Bowl
+            ctx.fillStyle = `rgba(180, 180, 180, ${alpha})`;
+            ctx.beginPath();
+            ctx.arc(0, -12, 15, 0, Math.PI, true);
+            ctx.fill();
+            ctx.stroke();
+
+            // Receiver Needle
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(0, -22); ctx.stroke();
+            ctx.restore();
+
+            // 3. SIGNAL MAST (The Tall Antenna)
+            ctx.translate(15, -20);
+            ctx.strokeStyle = `rgba(70, 70, 70, ${alpha})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -35); ctx.stroke();
+
+            // Cross-bars
+            ctx.beginPath();
+            ctx.moveTo(-5, -25); ctx.lineTo(5, -25);
+            ctx.moveTo(-3, -30); ctx.lineTo(3, -30);
+            ctx.stroke();
+
+            // Blinking Red Light at the tip
+            const blink = Math.sin(cosmeticObjPulse * 3) > 0;
+            ctx.fillStyle = blink ? `rgba(255, 0, 0, ${alpha})` : `rgba(50, 0, 0, ${alpha})`;
+            ctx.beginPath();
+            ctx.arc(0, -37, 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawRocket(ctx, obj, type) {
             if (obj.exploded) return;
             ctx.save(); ctx.translate(obj.x, obj.y); ctx.rotate(obj.angle + Math.PI / 2);
             ctx.fillStyle = obj.color; ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1;
@@ -632,11 +701,9 @@
                 ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-8.1, -12); ctx.lineTo(8.1, -12); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-8.1, 6); ctx.lineTo(8.1, 6); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-3.6, -24); ctx.lineTo(-3.6, 24); ctx.stroke();
             }
             if (type === 'ship' || obj.legsVisible) {
-                ctx.strokeStyle = obj.color; ctx.beginPath();
-                const yBase = (type === 'booster') ? 18 : 15;
+                ctx.strokeStyle = obj.color; ctx.beginPath(); const yBase = (type === 'booster') ? 18 : 15;
                 ctx.moveTo(-8.1, yBase); ctx.lineTo(-14.4, yBase + 10); ctx.lineTo(-18.9, yBase + 10);
-                ctx.moveTo(8.1, yBase); ctx.lineTo(14.4, yBase + 10); ctx.lineTo(18.9, yBase + 10);
-                ctx.stroke();
+                ctx.moveTo(8.1, yBase); ctx.lineTo(14.4, yBase + 10); ctx.lineTo(18.9, yBase + 10); ctx.stroke();
             }
             const active = !separated ? (obj === booster && ship.thrusting) : obj.thrusting;
             const currentFuel = (!separated && obj === booster) ? booster.fuel : obj.fuel;
@@ -649,48 +716,280 @@
         }
 
         function draw() {
-            ctx.fillStyle = '#000'; ctx.fillRect(0, 0, width, height);
-            stars.forEach(s => { ctx.fillStyle = `rgba(255,255,255,${s.opacity})`; ctx.fillRect(s.x, s.y, s.size, s.size); });
-            ctx.save(); ctx.setLineDash([10, 10]); ctx.strokeStyle = 'rgba(100, 100, 100, 0.4)'; ctx.beginPath(); ctx.moveTo(0, TARGET_ALT_Y - ALT_ENVELOPE); ctx.lineTo(width, TARGET_ALT_Y - ALT_ENVELOPE); ctx.moveTo(0, TARGET_ALT_Y + ALT_ENVELOPE); ctx.lineTo(width, TARGET_ALT_Y + ALT_ENVELOPE); ctx.stroke(); ctx.restore();
-            backgroundObjects.forEach(obj => { if (obj.type === 'Eagle') drawCosmeticEagle(obj, obj.alpha); else if (obj.type === 'Buggy') drawCosmeticBuggy(obj, obj.alpha); });
-            
-            // --- DRAW STARTUP INSTRUCTIONS ---
-            const now = performance.now();
-            if (instructionsStartTime && (now - instructionsStartTime) < 5000) {
-                ctx.save();
-                ctx.font = 'bold 40px Segoe UI, Arial, sans-serif'; // "fairly large"
-                ctx.fillStyle = 'rgba(0, 255, 255, 0.7)'; // Cyan matching HUD, slightly faded
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                // Render text centered within the acceptable altitude band
-                ctx.fillText('Deploy Satellites Into Orbit', width / 2, TARGET_ALT_Y);
-                ctx.restore();
+            vCtx.fillStyle = '#000'; vCtx.fillRect(0, 0, virtualWidth, virtualHeight);
+            stars.forEach(s => { vCtx.fillStyle = `rgba(255,255,255,${s.opacity})`; vCtx.fillRect(s.x, s.y, s.size, s.size); });
+            vCtx.save(); vCtx.setLineDash([10, 10]); vCtx.lineWidth = 1; vCtx.strokeStyle = 'rgba(100, 100, 100, 1)'; vCtx.beginPath(); vCtx.moveTo(0, TARGET_ALT_Y - ALT_ENVELOPE);
+            vCtx.lineTo(width, TARGET_ALT_Y - ALT_ENVELOPE); vCtx.moveTo(0, TARGET_ALT_Y + ALT_ENVELOPE); vCtx.lineTo(width, TARGET_ALT_Y + ALT_ENVELOPE); vCtx.stroke(); vCtx.restore();
+
+            // Draw Saturn
+            if (planetImg.complete) {
+                vCtx.save();
+                vCtx.globalAlpha = 0.5; 
+                vCtx.drawImage(planetImg, 1200, 100, 110, 58);
+                vCtx.restore();
             }
-            
-            smokeTrail.forEach(p => { let color; if (p.plasma) color = `rgba(255, ${Math.random() * 150 + 100}, 0, ${p.life * 0.8})`; else if (p.isOrange) color = `rgba(255, 140, 0, ${p.life * 0.6})`; else color = `rgba(140,140,140,${p.life * 0.3})`; ctx.fillStyle = color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill(); });
-            ctx.strokeStyle = '#555'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(launchPad.x1, launchPad.y); ctx.lineTo(launchPad.x2, launchPad.y); ctx.stroke();
-            pads.forEach(p => {
-                ctx.strokeStyle = p.owner === 'Ship' ? '#00ffff' : '#ffffff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(p.x1, p.y); ctx.lineTo(p.x2, p.y); ctx.stroke();
-                if (p.owner === 'Booster') {
-                    let centerX = (p.x1 + p.x2) / 2; ctx.strokeStyle = '#303030'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(centerX + 15, p.y); ctx.lineTo(centerX + 15, p.y - 80); ctx.stroke();
-                    ctx.strokeStyle = '#303030'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(centerX + 20, p.y); ctx.lineTo(centerX + 20, p.y - 80); ctx.stroke();
-                    ctx.strokeStyle = '#404040'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(centerX + 15, p.y - 59); ctx.lineTo(centerX - 9, p.y - 59); ctx.stroke();
-                }
+
+            backgroundObjects.forEach(obj => {
+                if (obj.crashed) return;
+                if (obj.type === 'Eagle') drawCosmeticEagle(vCtx, obj, obj.alpha);
+                if (obj.type === 'Radar') drawCosmeticRadarStation(vCtx, obj, obj.alpha);
+                if (obj.type === 'Buggy') drawCosmeticBuggy(vCtx, obj, obj.alpha);
             });
-            craters.forEach(c => { ctx.strokeStyle = `rgba(120, 120, 120, ${c.alpha})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(c.x, c.y, c.radiusX, c.radiusY, 0, 0, Math.PI * 2); ctx.stroke(); });
-            ctx.strokeStyle = '#444'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(terrain[0] ? terrain[0].x : 0, terrain[0] ? terrain[0].y : height); terrain.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke();
-            drawRocket(ship, 'ship'); drawRocket(booster, 'booster');
-            legacySats.forEach(s => { ctx.fillStyle = `rgba(180, 240, 255, ${s.opacity})`; ctx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size); });
-            satellites.forEach(s => {
-                const heatRatio = Math.min(s.heat / 5, 1); const r = Math.floor(200 + (55 * heatRatio)), g = Math.floor(255 * (1 - heatRatio)), b = Math.floor(255 * (1 - heatRatio));
-                const streakLen = 0.1 + (heatRatio * 0.8); ctx.save(); const grad = ctx.createLinearGradient(s.x, s.y, s.x - s.vx * streakLen, s.y - s.vy * streakLen); grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${s.opacity})`); grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`); ctx.strokeStyle = grad; ctx.lineWidth = 1 + (heatRatio * 1); ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x - s.vx * streakLen, s.y - s.vy * streakLen); ctx.stroke(); ctx.restore(); ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${s.opacity})`; ctx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size);
+
+            // --- RESTORED INSTRUCTIONS OVERLAY ---
+            const now = performance.now();
+            if (instructionsStartTime && (now - instructionsStartTime) < 5000) { vCtx.save(); vCtx.letterSpacing = "4px"; vCtx.font = '30px "Lucida Console", Monaco, monospace'; vCtx.fillStyle = 'rgba(0, 255, 255, 0.7)'; vCtx.textAlign = 'center'; vCtx.textBaseline = 'middle'; vCtx.fillText('Deploy Satellites Into Orbit', width / 2, TARGET_ALT_Y); vCtx.restore(); }
+
+            smokeTrail.forEach(p => { let color; if (p.plasma) color = `rgba(255, ${Math.random() * 150 + 100}, 0, ${p.life * 0.8})`; else if (p.isOrange) color = `rgba(255, 140, 0, ${p.life * 0.6})`; else color = `rgba(140,140,140,${p.life * 0.3})`; vCtx.fillStyle = color; vCtx.beginPath(); vCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2); vCtx.fill(); });
+            vCtx.strokeStyle = '#555'; vCtx.lineWidth = 9; vCtx.beginPath(); vCtx.moveTo(launchPad.x1, launchPad.y); vCtx.lineTo(launchPad.x2, launchPad.y); vCtx.stroke();
+            //            pads.forEach(p => { vCtx.strokeStyle = p.owner === 'Ship' ? '#00ffff' : '#ffffff'; vCtx.lineWidth = 6; vCtx.beginPath(); vCtx.moveTo(p.x1 - 5, p.y - 1); vCtx.lineTo(p.x2 + 5, p.y - 1); vCtx.stroke(); if (p.owner === 'Booster') { let cX = (p.x1 + p.x2) / 2; vCtx.strokeStyle = '#303030'; vCtx.lineWidth = 2; vCtx.beginPath(); vCtx.moveTo(cX + 15, p.y); vCtx.lineTo(cX + 15, p.y - 80); vCtx.moveTo(cX + 20, p.y); vCtx.lineTo(cX + 20, p.y - 80); vCtx.stroke(); vCtx.strokeStyle = '#404040'; vCtx.lineWidth = 3; vCtx.beginPath(); vCtx.moveTo(cX + 15, p.y - 59); vCtx.lineTo(cX - 9, p.y - 59); vCtx.stroke(); } });
+            craters.forEach(c => { vCtx.strokeStyle = `rgba(120, 120, 120, ${c.alpha})`; vCtx.lineWidth = 2; vCtx.beginPath(); vCtx.ellipse(c.x, c.y, c.radiusX, c.radiusY, 0, 0, Math.PI * 2); vCtx.stroke(); });
+            vCtx.strokeStyle = '#444'; vCtx.lineWidth = 1.5; vCtx.beginPath(); vCtx.moveTo(terrain[0].x, terrain[0].y); terrain.forEach(p => vCtx.lineTo(p.x, p.y)); vCtx.stroke();
+            drawRocket(vCtx, ship, 'ship'); drawRocket(vCtx, booster, 'booster');
+            legacySats.forEach(s => { vCtx.fillStyle = `rgba(180, 240, 255, ${s.opacity})`; vCtx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size); });
+            satellites.forEach(s => { const heatRatio = Math.min(s.heat / 5, 1); const r = Math.floor(200 + (55 * heatRatio)), g = Math.floor(255 * (1 - heatRatio)), b = Math.floor(255 * (1 - heatRatio)); const streakLen = 0.1 + (heatRatio * 0.8); vCtx.save(); const grad = vCtx.createLinearGradient(s.x, s.y, s.x - s.vx * streakLen, s.y - s.vy * streakLen); grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${s.opacity})`); grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`); vCtx.strokeStyle = grad; vCtx.lineWidth = 1 + (heatRatio * 1); vCtx.beginPath(); vCtx.moveTo(s.x, s.y); vCtx.lineTo(s.x - s.vx * streakLen, s.y - s.vy * streakLen); vCtx.stroke(); vCtx.restore(); vCtx.fillStyle = `rgba(${r}, ${g}, ${b}, ${s.opacity})`; vCtx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size); });
+            pads.forEach(p => { vCtx.strokeStyle = p.owner === 'Ship' ? '#00ffff' : '#ffffff'; vCtx.lineWidth = 6; vCtx.beginPath(); vCtx.moveTo(p.x1 - 5, p.y - 1); vCtx.lineTo(p.x2 + 5, p.y - 1); vCtx.stroke(); if (p.owner === 'Booster') { let cX = (p.x1 + p.x2) / 2; vCtx.strokeStyle = '#303030'; vCtx.lineWidth = 2; vCtx.beginPath(); vCtx.moveTo(cX + 15, p.y); vCtx.lineTo(cX + 15, p.y - 80); vCtx.moveTo(cX + 20, p.y); vCtx.lineTo(cX + 20, p.y - 80); vCtx.stroke(); vCtx.strokeStyle = '#404040'; vCtx.lineWidth = 3; vCtx.beginPath(); vCtx.moveTo(cX + 15, p.y - 59); vCtx.lineTo(cX - 9, p.y - 59); vCtx.stroke(); } });
+
+
+
+
+
+            drawHUD(); // New Bitmap HUD draw call
+
+            //ctx.clearRect(0, 0, canvas.width, canvas.height);
+            //ctx.drawImage(offScreenCanvas, 0, 0, virtualWidth, virtualHeight, 0, 0, canvas.width, canvas.height);
+
+
+            // --- ASPECT RATIO CORRECTION ---
+            const screenRatio = canvas.width / canvas.height;
+            const virtualRatio = virtualWidth / virtualHeight;
+            let drawW, drawH, dx, dy;
+
+            if (screenRatio > virtualRatio) {
+                // Window is wider than the game (Pillarbox)
+                drawH = canvas.height;
+                drawW = drawH * virtualRatio;
+                dx = (canvas.width - drawW) / 2;
+                dy = 0;
+            } else {
+                // Window is taller than the game (Letterbox)
+                drawW = canvas.width;
+                drawH = drawW / virtualRatio;
+                dx = 0;
+                dy = (canvas.height - drawH) / 2;
+            }
+
+            ctx.fillStyle = '#000'; // Fill background for bars
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(offScreenCanvas, 0, 0, virtualWidth, virtualHeight, dx, dy, drawW, drawH);
+
+        }
+
+
+        function handleEagleEvasion() {
+            const scanDistX = 200; // How far in front they look
+            const scanDistY = 300; // How far above they look
+
+            backgroundObjects.forEach(eagle => {
+                // Only flying, non-crashed Eagles use radar
+                if (eagle.type !== 'Eagle' || eagle.crashed) return;
+
+                const targets = [ship, booster];
+                let threatFound = false;
+
+                for (let target of targets) {
+                    if (target.exploded) continue;
+
+                    // Calculate horizontal distance relative to Eagle's direction
+                    // (A positive result means the target is in front of the Eagle)
+                    const dx = (target.x - eagle.x) * eagle.direction;
+
+                    // Calculate vertical distance (positive means target is higher than Eagle)
+                    const dy = eagle.y - target.y;
+
+                    // If target is in the "Front-Above" quadrant
+                    if (dx > 0 && dx < scanDistX && dy > 0 && dy < scanDistY) {
+                        threatFound = true;
+                        break;
+                    }
+                }
+
+                if (threatFound) {
+                    eagle.direction *= -1; // Reverse direction
+                    eagle.x += eagle.direction * 5; // Small nudge to prevent frame-flip jitter
+                }
             });
         }
 
-        window.addEventListener('keydown', e => { if (!audioCtx) initAudio(); if (splashActive) return; keys[e.code] = true; if (e.code === 'KeyS' && !separated) { const midX = (ship.x + booster.x) / 2; const midY = (ship.y + booster.y) / 2; triggerSeparationSmoke(midX, midY); playSound('sep'); separated = true; booster.autopilot = true; booster.yv += 22; ship.yv -= 10; } if (e.code === 'KeyD') deploySatellites(); if (e.code === 'KeyA') { ship.autopilot = !ship.autopilot; playSound('beep'); } if (e.code === 'Space' && gameOver) init(false, true); });
-        window.addEventListener('keyup', e => keys[e.code] = false); window.addEventListener('mousedown', () => { if (!audioCtx) initAudio(); });
-        window.addEventListener('resize', () => { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; TARGET_ALT_Y = height * 0.25; });
-        init(false);
+
+
+        window.addEventListener('keydown', e => {
+            if (!audioCtx) initAudio();
+            if (splashActive && e.code === 'Space') { splashActive = false; splashDiv.style.display = 'none'; missionStart = performance.now(); instructionsStartTime = performance.now(); return; }
+            if (splashActive) return;
+            keys[e.code] = true;
+            if (e.code === 'KeyR') { init(false, true); return; }
+            if (e.code === 'KeyS' && !separated) { const midX = (ship.x + booster.x) / 2, midY = (ship.y + booster.y) / 2; triggerSeparationSmoke(midX, midY); playSound('sep'); separated = true; booster.autopilot = true; booster.yv += 22; ship.yv -= 10; }
+            if (e.code === 'KeyD') deploySatellites();
+            if (e.code === 'KeyA') { ship.autopilot = !ship.autopilot; }
+            if (e.code === 'Space' && gameOver) init(false, true);
+        });
+
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        window.addEventListener('mousedown', () => { if (!audioCtx) initAudio(); });
+        //window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        function playIntroSong() {
+            if (!audioCtx) initAudio();
+            const now = audioCtx.currentTime;
+            [[523.25, 0.0, 0.15], [659.25, 0.2, 0.15], [783.99, 0.4, 0.15], [1046.5, 0.6, 0.3], [783.99, 0.9, 0.1], [1046.5, 1.0, 0.5]].forEach(([f, d, du]) => { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(f, now + d); g.gain.setValueAtTime(0.06, now + d); g.gain.exponentialRampToValueAtTime(0.001, now + d + du); o.connect(g); g.connect(audioCtx.destination); o.start(now + d); o.stop(now + d + du); });
+        }
+
+        function demoUpdate() {
+            if (splashActive || gameOver) { demoPhase = 'launch'; return; }
+
+            const now = performance.now();
+            keys['ArrowRight'] = false;
+            keys['ArrowLeft'] = false;
+            keys['ArrowUp'] = false;
+
+            const targetHSpd = ORBITAL_VELOCITY;
+            const distanceToZone = ship.y - TARGET_ALT_Y;
+            const currentAlt = pads[0] ? pads[0].y - ship.y : height - ship.y;
+
+            // --- PHASE 1: VELOCITY & ALTITUDE BOOST ---
+            if (demoPhase === 'launch') {
+                // 1. CALCULATE TARGETS
+                const predictedApogeeY = ship.y - (Math.pow(Math.min(0, ship.yv), 2) / (2 * GRAVITY));
+                const trajectoryReady = predictedApogeeY <= TARGET_ALT_Y + (ALT_ENVELOPE / 2);
+                const speedReady = ship.xv >= targetHSpd;
+
+                // 2. DYNAMIC THROTTLE (Prioritize Altitude First)
+                if (!trajectoryReady) {
+                    if (ship.yv > -70) keys['ArrowUp'] = true;
+                } else {
+                    if (!speedReady && ship.yv > -15) keys['ArrowUp'] = true;
+                }
+
+                // 3. STABILIZED TILT (Programmatic Gravity Turn)
+                // Calculate height specifically relative to the starting pad surface
+                // (69 is the combined offset of the booster and ship heights at t=0)
+                const altAboveStart = launchPad.y - (ship.y + 69);
+
+                // Wait until the ship has climbed 100px above the pad before tilting
+                if (altAboveStart > 20) {
+                    // turnProgress now starts at 0 exactly when the ship hits 100px altitude
+                    const turnProgress = Math.min(1, (altAboveStart - 20) / 350);
+
+                    // targetAngle moves from -90 degrees toward -45 degrees
+                    const targetAngle = -Math.PI / 2 + (Math.PI / 4) * turnProgress;
+
+                    if (ship.angle < targetAngle) {
+                        // Pulse the right arrow to turn smoothly
+                        if (Math.floor(now / 16) % 2 === 0) keys['ArrowRight'] = true;
+                    }
+                }
+
+                // 4. SECURE INSERTION & SEPARATION
+                if (speedReady && trajectoryReady) {
+                    if (!separated) {
+                        const midX = (ship.x + booster.x) / 2, midY = (ship.y + booster.y) / 2;
+                        triggerSeparationSmoke(midX, midY);
+                        playSound('sep');
+                        separated = true;
+                        booster.autopilot = true;
+
+                        booster.yv += 22;
+                        ship.yv -= 10;
+                    }
+                    demoPhase = 'vertical_insertion';
+                }
+            }
+
+            // --- PHASE 2: VERTICAL INSERTION ---
+            else if (demoPhase === 'vertical_insertion') {
+                const verticalAngle = -Math.PI / 2;
+                if (ship.angle < verticalAngle - 0.02) {
+                    if (Math.floor(now / 16) % 4 === 0) keys['ArrowRight'] = true;
+                } else if (ship.angle > verticalAngle + 0.02) {
+                    if (Math.floor(now / 16) % 4 === 0) keys['ArrowLeft'] = true;
+                }
+
+                // Only pulse if we've lost our upward momentum before hitting the zone
+                if (ship.y > TARGET_ALT_Y + 10 && ship.yv > -5) {
+                    keys['ArrowUp'] = true;
+                }
+
+                if (Math.abs(distanceToZone) < ALT_ENVELOPE * 0.7) {
+                    demoPhase = 'deploy';
+                }
+            }
+            // --- PHASE 3: ORBITAL STABILIZATION & DEPLOYMENT ---
+            else if (demoPhase === 'deploy') {
+                // 1. HORIZONTAL VELOCITY TARGETING
+                const xvError = targetHSpd - ship.xv;
+
+                // Increased multiplier from 0.08 to 0.15 so it aggressively leans into the speed error
+                let targetAngle = -Math.PI / 2 + (xvError * 0.15);
+
+                // THE FIX: Allow a full 90-degree tilt. 
+                // -Math.PI is pointing straight left (pure retro-burn). 
+                // 0 is pointing straight right (pure pro-burn).
+                targetAngle = Math.max(-Math.PI, Math.min(0, targetAngle));
+
+                // SAFETY OVERRIDE: If the ship starts falling while trying to brake, 
+                // force the nose back straight UP so the engine can catch the fall.
+                if (ship.y > TARGET_ALT_Y || ship.yv > 2) {
+                    targetAngle = -Math.PI / 2;
+                }
+
+                if (ship.angle < targetAngle - 0.02) keys['ArrowRight'] = true;
+                else if (ship.angle > targetAngle + 0.02) keys['ArrowLeft'] = true;
+
+                // 2. 2-AXIS STATION KEEPING (Vertical & Horizontal)
+                const isAligned = Math.abs(ship.angle - targetAngle) < 0.15;
+                const needsHorizCorrection = Math.abs(xvError) > 3;
+
+                if (ship.y > TARGET_ALT_Y || ship.yv > 2) {
+                    if (ship.yv > -4) keys['ArrowUp'] = true; // Vertical thrust
+                } else if (needsHorizCorrection && isAligned) {
+                    keys['ArrowUp'] = true; // Horizontal correction thrust
+                }
+
+                // 3. STRICT DEPLOYMENT ENVELOPE
+                const isInZone = Math.abs(ship.y - TARGET_ALT_Y) < ALT_ENVELOPE;
+                const isStabilizedVert = Math.abs(ship.yv) < 5;
+                const isStabilizedHoriz = Math.abs(xvError) < 4;
+
+                // Added `isInZone` to the final check so doors stay locked until we drop into the band
+                if (isInZone && isStabilizedVert && isStabilizedHoriz && now - lastDeployTime > 1200 && satInventory > 0) {
+                    deploySatellites();
+                    lastDeployTime = now;
+                }
+
+                if (satInventory <= 0) {
+                    demoPhase = 'prepare_land';
+                    playSound('beep');
+                }
+            }
+
+            // --- PHASE 4: AUTOLAND HANDOFF ---
+            else if (demoPhase === 'prepare_land') {
+                ship.autopilot = true;
+                demoPhase = 'autopilot_active';
+            }
+        }
+
+        const startLanding = () => { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); init(false); window.removeEventListener('mousedown', startLanding); window.removeEventListener('keydown', startLanding); };
+        window.addEventListener('mousedown', startLanding); window.addEventListener('keydown', startLanding);
+
+        canvas.width = window.innerWidth; canvas.height = window.innerHeight;
     </script>
 </body>
 

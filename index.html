@@ -17,10 +17,19 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
 
+        /* canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        } */
+
         canvas {
             display: block;
             width: 100vw;
             height: 100vh;
+            touch-action: none;
+            /* This prevents the browser from trying to scale/zoom the touch surface */
+            box-sizing: border-box;
         }
 
         #splash {
@@ -64,800 +73,2131 @@
 </head>
 
 <body>
-
-    <div id="splash">
-        <img id="splash-image" src="splashScreen.png" alt="Lunar Launcher">
-    </div>
-
+    <div id="splash"><img id="splash-image" src="splashScreen.png" alt="Lunar Launcher"></div>
     <div id="msg"></div>
-
     <canvas id="landCanvas"></canvas>
 
     <script>
+        // Saturn
+        const planetImg = new Image(); planetImg.src = 'saturn.jpg';
 
-        const planetImg = new Image();
-        planetImg.src = 'saturn.jpg';
+        // Store Logos
+        const storeLogos = [];
+        for (let i = 1; i <= 10; i++) {
+            const img = new Image();
+            img.src = `store${i}.jpg`;
+            storeLogos.push(img);
+        }
 
-        const canvas = document.getElementById('landCanvas');
-        const ctx = canvas.getContext('2d');
+
+        const canvas = document.getElementById('landCanvas'); const ctx = canvas.getContext('2d');
         let bgMusic = null;
 
         // --- BITMAP RENDERING SETUP ---
-        const virtualWidth = 1920;
-        const virtualPlayHeight = 1080; // The original gameplay arena
-        const virtualHUDHeight = 140;   // The telemetry area
-        const virtualHeight = virtualPlayHeight + virtualHUDHeight; // Total 1220px
-
-        const offScreenCanvas = document.createElement('canvas');
-        offScreenCanvas.width = virtualWidth;
-        offScreenCanvas.height = virtualHeight;
+        const virtualWidth = 1920, virtualPlayHeight = 1080, virtualHUDHeight = 140, virtualHeight = 1220;
+        const offScreenCanvas = document.createElement('canvas'); offScreenCanvas.width = virtualWidth; offScreenCanvas.height = virtualHeight;
         const vCtx = offScreenCanvas.getContext('2d');
-        // ------------------------------
 
-        const msgBox = document.getElementById('msg');
-        const splashDiv = document.getElementById('splash');
-        const splashImg = document.getElementById('splash-image');
+        const msgBox = document.getElementById('msg'), splashDiv = document.getElementById('splash'), splashImg = document.getElementById('splash-image');
 
-        let width, height; // Logic will use 'height' for 1080 area
-        const GRAVITY = 15; const THRUST = 44; const MAX_ROT_SPEED = 2.2;
-        const ORBITAL_VELOCITY = 45; const VELOCITY_TOLERANCE = 12;
-        const TIME_SCALE = 0.75; const LOST_BUFFER = 100;
-        const EAGLE_WIDTH = 100; const EAGLE_HEIGHT = 50;
-        let TARGET_ALT_Y; const ALT_ENVELOPE = 45;
+        let width, height;
+        const GRAVITY = 15, THRUST = 44, MAX_ROT_SPEED = 2.2, ORBITAL_VELOCITY = 45, VELOCITY_TOLERANCE = 12, TIME_SCALE = 0.75, LOST_BUFFER = 100, EAGLE_WIDTH = 100, EAGLE_HEIGHT = 50, ALT_ENVELOPE = 45;
+        let TARGET_ALT_Y, ship, booster, terrain = [], pads = [], launchPad = {}, smokeTrail = [], stars = [], legacySats = [], backgroundObjects = [], craters = [], satellites = [];
 
-        let ship, booster, terrain = [], pads = [], launchPad = {};
-        let smokeTrail = [], stars = [], legacySats = [], backgroundObjects = [];
-        let craters = [], satellites = [];
+        let gameOver = false, separated = false, totalDeployed = 0, doorOpen = false, satInventory = 50, lastTime = performance.now(), missionStart = lastTime; demoEnabled = false;
+        let demoPhase = 'launch', lastDeployTime = 0, instructionsStartTime = null, animationId = null, pulseAngle = 0, cosmeticObjPulse = 0, splashActive = true;
+        let rotKeyHeldTime = 0, timeSinceGameOver = 0, audioCtx = null, engineOsc = null, engineGain = null;
 
-        let gameOver = false, separated = false, totalDeployed = 0, doorOpen = false, satInventory = 50;
-        let lastTime = performance.now(), missionStart = lastTime;
-        let demoPhase = 'launch', lastDeployTime = 0, instructionsStartTime = null;
-        let animationId = null, pulseAngle = 0, cosmeticObjPulse = 0;
-        let splashActive = true; let rotKeyHeldTime = 0; const keys = {};
-        let timeSinceGameOver = 0, audioCtx = null, engineOsc = null, engineGain = null;
-
-        // UI State Object (replaces DOM element properties)
-        const uiState = {
-            timer: "T+ 00:00",
-            milestone: "OFFLINE",
-            payloadText: "READY",
-            payloadInZone: false,
-            satCount: 0,
-            mbps: 0
+        //const keys = {};
+        const activeInputs = {
+            'ArrowUp': false, 'ArrowLeft': false, 'ArrowRight': false,
+            'KeyS': false, 'KeyD': false, 'KeyA': false
         };
 
-        function resetGame() {
-            const startX = (launchPad.x1 + launchPad.x2) / 2;
-            const boosterY = launchPad.y - 25;
-            const shipY = boosterY - 44;
-            ship = { id: 'Ship', x: startX, y: shipY, xv: 0, yv: 0, width: 20, height: 60, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: false, landed: false, crashed: false, exploded: false, color: '#00a8a8' };
-            booster = { id: 'Booster', x: startX, y: boosterY, xv: 0, yv: 0, width: 30, height: 50, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: false, landed: false, crashed: false, exploded: false, color: '#b0b0b0', legsVisible: true };
-            demoPhase = 'launch'; separated = false; doorOpen = false; satInventory = 50; lastDeployTime = 0;
-            msgBox.style.display = 'none'; missionStart = performance.now(); smokeTrail = [];
-            generateCosmeticObjects();
-        }
+        // Map touch/mouse identifiers to these keys
+        const touchMap = new Map();
+        let o2Level = 0;
 
-        // function initAudio() {
-        //     if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
-        //     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        //     audioCtx.resume();
-        //     engineOsc = audioCtx.createOscillator(); engineGain = audioCtx.createGain();
-        //     engineOsc.type = 'sawtooth'; engineOsc.frequency.setValueAtTime(55, audioCtx.currentTime);
-        //     engineGain.gain.setValueAtTime(0, audioCtx.currentTime);
-        //     engineOsc.connect(engineGain); engineGain.connect(audioCtx.destination);
-        //     engineOsc.start();
+        // --- THREE-BODY PROBLEM BACKGROUND SETUP ---
+        let threeBodyTime = 0;
+        const threeBodySystem = {
+            centerX: 1920 * 0.1, // Shifted slightly right for optimal sky visibility
+            centerY: 1220 * 0.1,
+            scale: 50,           // Increased scale so the loops are wide and dramatic
+            speed: 0.1,           // Slightly faster speed to make the trail drift more dynamic
+            suns: [
+                { x: 0, y: 0, r: 8, color: '#e2cfa0', glow: 'rgba(224, 207, 160, 0.15)', trail: [] },
+                { x: 0, y: 0, r: 7, color: '#cd9a85', glow: 'rgba(205, 154, 133, 0.15)', trail: [] },
+                { x: 0, y: 0, r: 5, color: '#a0b5c0', glow: 'rgba(160, 181, 192, 0.12)', trail: [] }
+            ]
+        };
+
+        // Alien Asset Loading
+        const alienImg = new Image(); alienImg.src = 'alien.png';
+
+        // Trackers for Alien System
+        let alienShip = { x: 0, y: 0, width: 80, height: 50, speed: 150, direction: 1, active: false, nextSpawnTime: performance.now() + 8000, shootTimer: 0 };
+        let alienLasers = [];
+        let radarBullets = [];
+        const uiState = { timer: "T+ 00:00", milestone: "OFFLINE", payloadText: "READY", payloadInZone: false, satCount: 0, mbps: 0, gameLevel: 0 };
+
+
+
+        // function resetGame() {
+        //     const startX = (launchPad.x1 + launchPad.x2) / 2, boosterY = launchPad.y - 25, shipY = boosterY - 44;
+        //     ship = { id: 'Ship', x: startX, y: shipY, xv: 0, yv: 0, width: 20, height: 60, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: false, landed: false, crashed: false, exploded: false, color: '#00a8a8' };
+        //     booster = { id: 'Booster', x: startX, y: boosterY, xv: 0, yv: 0, width: 30, height: 50, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: false, landed: false, config: 'standard', crashed: false, exploded: false, color: '#b0b0b0', legsVisible: true };
+
+        //     demoPhase = 'launch'; separated = false; doorOpen = false; satInventory = 50; lastDeployTime = 0; msgBox.style.display = 'none'; missionStart = performance.now(); smokeTrail = []; generateCosmeticObjects();
         // }
 
 
+        function resetGame() {
+            const startX = (launchPad.x1 + launchPad.x2) / 2, boosterY = launchPad.y - 25, shipY = boosterY - 44;
+
+            // Reset ships with full properties
+            ship = { id: 'Ship', x: startX, y: shipY, xv: 0, yv: 0, width: 20, height: 60, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: false, landed: false, crashed: false, exploded: false, color: '#00a8a8' };
+
+            // EXPLICITLY RESET CONFIGURATION
+            booster = {
+                id: 'Booster', x: startX, y: boosterY, xv: 0, yv: 0, width: 30, height: 50,
+                angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: false,
+                landed: false, config: 'standard', // <--- Ensure this is always 'standard' on reset
+                crashed: false, exploded: false, color: '#b0b0b0', legsVisible: true
+            };
+
+            // Reset game state variables
+            demoPhase = 'launch';
+            separated = false;
+            doorOpen = false;
+            satInventory = 50;
+            lastDeployTime = 0;
+            msgBox.style.display = 'none';
+            missionStart = performance.now();
+            smokeTrail = [];
+            generateCosmeticObjects();
+            stopWacaWaca();
+
+            alienShip.active = false;
+            alienShip.nextSpawnTime = performance.now() + 8000 + (Math.random() * 5000); // Reset the spawn timer
+            alienLasers = [];
+            radarBullets = [];
+        }
+
+
+
         function initAudio() {
-            if (audioCtx) {
-                if (audioCtx.state === 'suspended') audioCtx.resume();
-                return;
-            }
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            audioCtx.resume();
-
-            // --- ADD THIS BLOCK ---
-            if (!bgMusic) {
-                bgMusic = new Audio('gameMusic.mp3');
-                bgMusic.loop = true;
-                bgMusic.volume = 0.4; // Adjust this (0.0 to 1.0) so it doesn't drown out engines
-            }
-            // -----------------------
-
-            engineOsc = audioCtx.createOscillator(); engineGain = audioCtx.createGain();
-            engineOsc.type = 'sawtooth'; engineOsc.frequency.setValueAtTime(55, audioCtx.currentTime);
-            engineGain.gain.setValueAtTime(0, audioCtx.currentTime);
-            engineOsc.connect(engineGain); engineGain.connect(audioCtx.destination);
-            engineOsc.start();
+            if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+            // Music
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume();
+            if (!bgMusic) { bgMusic = new Audio('gameMusic.mp3'); bgMusic.loop = true; bgMusic.volume = 0.4; }
+            engineOsc = audioCtx.createOscillator(); engineGain = audioCtx.createGain(); engineOsc.type = 'sawtooth'; engineOsc.frequency.setValueAtTime(55, audioCtx.currentTime);
+            engineGain.gain.setValueAtTime(0, audioCtx.currentTime); engineOsc.connect(engineGain); engineGain.connect(audioCtx.destination); engineOsc.start();
         }
 
         function playSound(type) {
-            if (!audioCtx) return;
-            const now = audioCtx.currentTime;
-            const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-            o.connect(g); g.connect(audioCtx.destination);
+            if (!audioCtx) return; const now = audioCtx.currentTime, o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination);
             if (type === 'deploy') { o.type = 'triangle'; o.frequency.setValueAtTime(440, now); o.frequency.exponentialRampToValueAtTime(880, now + 0.1); g.gain.setValueAtTime(0.05, now); g.gain.linearRampToValueAtTime(0, now + 0.1); o.start(); o.stop(now + 0.1); }
             else if (type === 'sep') { o.type = 'sawtooth'; o.frequency.setValueAtTime(110, now); g.gain.setValueAtTime(0.1, now); g.gain.linearRampToValueAtTime(0, now + 0.2); o.start(); o.stop(now + 0.2); }
             else if (type === 'crash') { o.type = 'sawtooth'; o.frequency.setValueAtTime(60, now); o.frequency.exponentialRampToValueAtTime(30, now + 0.8); g.gain.setValueAtTime(0.3, now); g.gain.linearRampToValueAtTime(0, now + 0.8); o.start(); o.stop(now + 0.8); }
-            else if (type === 'success') { [523, 659, 783, 1046].forEach((f, i) => { const o2 = audioCtx.createOscillator(); const g2 = audioCtx.createGain(); o2.type = 'square'; o2.connect(g2); g2.connect(audioCtx.destination); o2.frequency.setValueAtTime(f, now + i * 0.1); g2.gain.setValueAtTime(0.04, now + i * 0.1); g2.gain.linearRampToValueAtTime(0, now + i * 0.1 + 0.2); o2.start(now + i * 0.1); o2.stop(now + i * 0.1 + 0.2); }); }
+            else if (type === 'success') {
+                [523, 659, 783, 1046].forEach((f, i) => { const o2 = audioCtx.createOscillator(), g2 = audioCtx.createGain(); o2.type = 'square'; o2.connect(g2); g2.connect(audioCtx.destination); o2.frequency.setValueAtTime(f, now + i * 0.1); g2.gain.setValueAtTime(0.04, now + i * 0.1); g2.gain.linearRampToValueAtTime(0, now + i * 0.1 + 0.2); o2.start(now + i * 0.1); o2.stop(now + i * 0.1 + 0.2); });
+            }
+            else if (type === 'build') {
+                // Base low impact thud
+                o.type = 'square';
+                o.frequency.setValueAtTime(90, now);
+                o.frequency.exponentialRampToValueAtTime(40, now + 0.4);
+                g.gain.setValueAtTime(0.25, now);
+                g.gain.linearRampToValueAtTime(0, now + 0.4);
+                o.start(); o.stop(now + 0.4);
+
+                // Futuristic construction layer
+                const o2 = audioCtx.createOscillator(), g2 = audioCtx.createGain();
+                o2.type = 'triangle'; o2.connect(g2); g2.connect(audioCtx.destination);
+                o2.frequency.setValueAtTime(180, now);
+                o2.frequency.exponentialRampToValueAtTime(360, now + 0.25);
+                g2.gain.setValueAtTime(0.15, now);
+                g2.gain.linearRampToValueAtTime(0, now + 0.25);
+                o2.start(); o2.stop(now + 0.25);
+            }
+            else if (type === 'laserHit') {
+                // A quick, sharp sizzle/thud for the ground impact
+                o.type = 'sawtooth';
+                o.frequency.setValueAtTime(300, now);
+                o.frequency.exponentialRampToValueAtTime(30, now + 0.15);
+                g.gain.setValueAtTime(0.2, now);
+                g.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                o.start(); o.stop(now + 0.15);
+            }
+
+        }
+
+
+        // NEW: Global tracker for the alien engine sound
+        let wacaOscillator = null;
+
+        function playWacaWaca(duration = 1.5) {
+            if (!audioCtx) return;
+
+            // If one is already playing, stop it before starting a new one
+            stopWacaWaca();
+
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            // Track it globally so we can kill it later
+            wacaOscillator = osc;
+
+            osc.type = 'square';
+            const speed = 0.14;
+            const totalSteps = Math.floor(duration / speed);
+
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            for (let i = 0; i < totalSteps; i++) {
+                const stepTime = now + (i * speed);
+                const frequency = (i % 2 === 0) ? 523 : 880;
+                osc.frequency.setValueAtTime(frequency, stepTime);
+                osc.frequency.linearRampToValueAtTime(frequency === 523 ? 650 : 400, stepTime + speed * 0.7);
+                gainNode.gain.setValueAtTime(0.05, stepTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, stepTime + speed * 0.92);
+            }
+
+            osc.start(now);
+            osc.stop(now + duration);
+
+            // Clean up the reference when it finishes naturally
+            osc.onended = () => {
+                if (wacaOscillator === osc) wacaOscillator = null;
+            };
+        }
+
+        // NEW: Helper function to kill the sound instantly
+        function stopWacaWaca() {
+            if (wacaOscillator) {
+                try {
+                    wacaOscillator.stop();
+                    wacaOscillator.disconnect();
+                } catch (e) { } // Catch error if it already stopped
+                wacaOscillator = null;
+            }
         }
 
         function setEngineVolume(vol) { if (engineGain) engineGain.gain.setTargetAtTime(vol * 0.05, audioCtx.currentTime, 0.05); }
 
         async function triggerSplashScreen() {
-            splashActive = true; splashDiv.style.opacity = "1";
-            setTimeout(() => { if (splashImg) splashImg.style.opacity = "1"; }, 100);
-            playIntroSong();
-            setTimeout(() => {
-                splashDiv.style.opacity = "0";
-                setTimeout(() => { splashDiv.style.display = 'none'; splashActive = false; missionStart = performance.now(); instructionsStartTime = performance.now(); if (bgMusic) bgMusic.play(); }, 1500);
-            }, 4000);
-
+            splashActive = true; splashDiv.style.opacity = "1"; setTimeout(() => { if (splashImg) splashImg.style.opacity = "1"; }, 100);
+            playIntroSong(); setTimeout(() => { splashDiv.style.opacity = "0"; setTimeout(() => { splashDiv.style.display = 'none'; splashActive = false; missionStart = performance.now(); instructionsStartTime = performance.now(); if (bgMusic) bgMusic.play(); }, 1500); }, 4000);
         }
 
-        function init(keepAutopilot = false, isReset = false) {
+        // function init(keepAutopilot = false, isReset = false) {
+
+
+        function init(keepAutopilot = false, isReset = false, keepDemo = false) {
+
             if (animationId) cancelAnimationFrame(animationId);
-            width = virtualWidth;
-            height = virtualPlayHeight; // Constant 1080 for physics
-            TARGET_ALT_Y = height * 0.25; gameOver = false; separated = false; totalDeployed = 0; doorOpen = false; satInventory = 50; timeSinceGameOver = 0;
-            if (!isReset) { satellites = []; splashActive = true; } else { splashActive = false; }
-            instructionsStartTime = null; msgBox.style.display = 'none';
-            const now = performance.now(); lastTime = now; missionStart = now;
-            smokeTrail = []; legacySats = []; backgroundObjects = []; rotKeyHeldTime = 0; cosmeticObjPulse = 0;
-            generateTerrain(); generateCosmeticObjects();
-            const startX = (launchPad.x1 + launchPad.x2) / 2;
-            const boosterY = launchPad.y - 25; const shipY = boosterY - 44;
-            ship = { id: 'Ship', x: startX, y: shipY, xv: 0, yv: 0, width: 20, height: 60, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: keepAutopilot, landed: false, crashed: false, exploded: false, color: '#00a8a8' };
-            booster = { id: 'Booster', x: startX, y: boosterY, xv: 0, yv: 0, width: 30, height: 50, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: keepAutopilot, landed: false, crashed: false, exploded: false, color: '#b0b0b0', legsVisible: true };
-            stars = [];
-            for (let i = 0; i < 150; i++) stars.push({ x: Math.random() * width, y: Math.random() * (height * 0.66), size: Math.random() * 1.5, opacity: Math.random() });
+
+            // If not keeping demo, force it off. 
+            // If we are doing a manual reset, we probably want to keep the current setting.
+            if (!keepDemo) demoEnabled = false;
+            stopWacaWaca();
+            width = virtualWidth; height = virtualPlayHeight; TARGET_ALT_Y = height * 0.25;
+            demoPhase = 'launch';
+            gameOver = false; separated = false; totalDeployed = 0; doorOpen = false; satInventory = 50; timeSinceGameOver = 0; if (!isReset) { satellites = []; splashActive = true; } else { splashActive = false; }
+            instructionsStartTime = null; msgBox.style.display = 'none'; const now = performance.now(); lastTime = now; missionStart = now; smokeTrail = []; legacySats = []; backgroundObjects = []; rotKeyHeldTime = 0; cosmeticObjPulse = 0;
+            generateTerrain();
+            generateCosmeticObjects();
+            const startX = (launchPad.x1 + launchPad.x2) / 2, boosterY = launchPad.y - 25, shipY = boosterY - 44;
+            ship = { id: 'Ship', x: startX, y: shipY, xv: 0, yv: 0, width: 20, height: 60, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: keepAutopilot, landed: false, crashed: false, exploded: false, color: '#007878' };
+            booster = { id: 'Booster', x: startX, y: boosterY, xv: 0, yv: 0, width: 30, height: 50, angle: -Math.PI / 2, fuel: 500, thrusting: false, autopilot: keepAutopilot, landed: false, config: 'standard', crashed: false, exploded: false, color: '#808080', legsVisible: true };
+            stars = []; for (let i = 0; i < 150; i++) stars.push({ x: Math.random() * width, y: Math.random() * (height * 0.66), size: Math.random() * 1.5, opacity: Math.random() });
             for (let i = 0; i < 20; i++) legacySats.push({ x: Math.random() * width, y: TARGET_ALT_Y + (Math.random() - 0.5) * (ALT_ENVELOPE * 3), vx: 35 + Math.random() * 25, vy: (Math.random() - 0.5) * 10, size: 3, opacity: 0.2 + Math.random() * 0.3 });
             if (!isReset) triggerSplashScreen(); else { splashDiv.style.display = 'none'; instructionsStartTime = performance.now(); }
             lastTime = performance.now(); animationId = requestAnimationFrame(update);
         }
 
         function generateTerrain() {
-            terrain = []; pads = []; const points = 220; const spacing = width / points; const seed = Math.random() * 1000;
-            // const getTerrainHeight = (x) => {
-            //     const h1 = Math.sin(x * 0.003 + seed) * 130;
-            //     const h2 = Math.sin(x * 0.01 + seed * 1.5) * 60;
-            //     const h3 = Math.sin(x * 0.025 + seed * 2) * 15;
-            //     return height - (350 + h1 + h2 + h3);
-            // };
-            const getTerrainHeight = (x) => {
-                // Reduce these multipliers to flatten the terrain
-                const h1 = Math.sin(x * 0.003 + seed) * 50;  // Was 130 (Large mountains)
-                const h2 = Math.sin(x * 0.01 + seed * 1.5) * 20; // Was 60  (Medium hills)
-                const h3 = Math.sin(x * 0.025 + seed * 2) * 5;   // Was 15  (Surface detail/crags)
-
-                // This base offset (350) determines the average height of the ground
-                return height - (200 + h1 + h2 + h3);
-            };
-
-            const lpStart = 10, lpEnd = 25;
-            const lpY = getTerrainHeight(lpStart * spacing);
-            launchPad = { x1: lpStart * spacing, x2: lpEnd * spacing, y: lpY };
-            const p1Start = Math.floor(points * (0.15 + Math.random() * 0.30));
-            const p2Start = Math.floor(points * (0.60 + Math.random() * 0.25));
-            const padPointWidth = 7;
+            terrain = []; pads = []; const points = 220, spacing = width / points, seed = Math.random() * 1000;
+            const getTerrainHeight = (x) => { const h1 = Math.sin(x * 0.003 + seed) * 50, h2 = Math.sin(x * 0.01 + seed * 1.5) * 20, h3 = Math.sin(x * 0.025 + seed * 2) * 5; return height - (250 + h1 + h2 + h3); };
+            const lpS = 10, lpE = 25, lpY = getTerrainHeight(lpS * spacing); launchPad = { x1: lpS * spacing, x2: lpE * spacing, y: lpY };
+            const p1S = Math.floor(points * (0.35 + Math.random() * 0.20)), p2S = Math.floor(points * (0.60 + Math.random() * 0.25)), pW = 7;
             for (let i = 0; i <= points; i++) {
-                let tx = i * spacing; let ty;
-                if (i >= lpStart && i <= lpEnd) ty = lpY;
-                else if (i >= p1Start && i <= p1Start + padPointWidth) { ty = getTerrainHeight(p1Start * spacing); if (i === p1Start) pads.push({ x1: tx, x2: tx + (padPointWidth * spacing), y: ty, owner: 'Booster' }); }
-                else if (i >= p2Start && i <= p2Start + padPointWidth) { ty = getTerrainHeight(p2Start * spacing); if (i === p2Start) pads.push({ x1: tx, x2: tx + (padPointWidth * spacing), y: ty, owner: 'Ship' }); }
-                else ty = getTerrainHeight(tx);
-                terrain.push({ x: tx, y: ty });
+                let tx = i * spacing, ty; if (i >= lpS && i <= lpE) ty = lpY;
+                else if (i >= p1S && i <= p1S + pW) { ty = getTerrainHeight(p1S * spacing); if (i === p1S) pads.push({ x1: tx, x2: tx + (pW * spacing), y: ty, owner: 'Booster' }); }
+                else if (i >= p2S && i <= p2S + pW) { ty = getTerrainHeight(p2S * spacing); if (i === p2S) pads.push({ x1: tx, x2: tx + (pW * spacing), y: ty, owner: 'Ship' }); }
+                else ty = getTerrainHeight(tx); terrain.push({ x: tx, y: ty });
             }
-            craters = [];
-            for (let i = 0; i < 10; i++) {
-                const x = Math.random() * width; const groundPoint = terrain.find(p => p.x > x) || terrain[terrain.length - 1];
-                craters.push({ x: x, y: groundPoint.y + 15 + Math.random() * 80, radiusX: 10 + Math.random() * 40, radiusY: 4 + Math.random() * 12, alpha: 0.1 + Math.random() * 0.2 });
+            craters = []; for (let i = 0; i < 10; i++) {
+                const x = Math.random() * width, gP = terrain.find(p => p.x > x) || terrain[terrain.length - 1];
+                craters.push({ x: x, y: gP.y + 15 + Math.random() * 80, radiusX: 10 + Math.random() * 40, radiusY: 4 + Math.random() * 12, alpha: 0.1 + Math.random() * 0.2 });
             }
         }
 
         function generateCosmeticObjects() {
-            backgroundObjects = [];
-            for (let i = 0; i < 2; i++) backgroundObjects.push({ type: 'Eagle', x: Math.random() * width, y: height - 400 - Math.random() * 100, size: 0.35, speed: 25 + Math.random() * 15, direction: Math.random() > 0.5 ? 1 : -1, alpha: 0.8, tilt: 0, isGrounded: false });
-            for (let i = 0; i < 3; i++) backgroundObjects.push({ type: 'Buggy', x: (width * 0.1) + Math.random() * (width * 0.8), y: 0, size: 0.6, speed: 6 + Math.random() * 4, direction: Math.random() > 0.5 ? 1 : -1, alpha: 0.8, angle: 0, isGrounded: true });
-            // Radar Station
-            if (pads.length >= 2) {
-                const pad1Center = (pads[0].x1 + pads[0].x2) / 2;
-                const pad2Center = (pads[1].x1 + pads[1].x2) / 2;
-                const midPointX = (pad1Center + pad2Center) / 2;
 
-                // Spawn 1 Radar Station at exactly the midpoint
+            // Eagles
+            backgroundObjects = []; for (let i = 0; i < uiState.gameLevel; i++) backgroundObjects.push({ type: 'Eagle', x: Math.random() * width, y: height - 400 - Math.random() * 100, size: 0.2 + Math.random() * 0.2, speed: 25 + Math.random() * 15, direction: Math.random() > 0.5 ? 1 : -1, alpha: 0.8, tilt: 0, isGrounded: false });
+
+            // Buggies
+            if (uiState.gameLevel >= 0) { for (let i = 0; i < (uiState.gameLevel * 2) + 1; i++) backgroundObjects.push({ type: 'Buggy', x: (width * 0.1) + Math.random() * (width * 0.8), y: 0, size: 0.6, speed: 6 + Math.random() * 4, direction: Math.random() > 0.5 ? 1 : -1, alpha: 0.8, angle: 0, isGrounded: true }); }
+
+            // Radar Stations
+            if (uiState.gameLevel >= 0) { const mPX = ((pads[0].x1 + pads[0].x2) / 2 + (pads[1].x1 + pads[1].x2) / 2) / 2; backgroundObjects.push({ type: 'Radar', x: mPX, y: 0, size: 1.0, speed: 0, direction: 1, alpha: 0.8, angle: 0, isGrounded: true }); }
+
+            // Ground Terra Form Stations
+            if (uiState.gameLevel >= 0) {
+                for (let i = 0; i < uiState.gameLevel; i++) {
+                    backgroundObjects.push({
+                        type: 'Terraform',
+                        x: width * 0.92,
+                        y: 0, // logic handles Y height
+                        size: 0.8,
+                        speed: 0,
+                        direction: 1,
+                        alpha: 1.0,
+                        angle: 0,
+                        isGrounded: true
+                    });
+                }
+            }
+
+            // Space Solar Arrays
+            if (uiState.gameLevel >= 0) {
+                for (let i = 0; i < uiState.gameLevel; i++) {
+                    backgroundObjects.push({
+                        type: 'SpaceArray',
+                        x: Math.random() * width,
+                        y: (height / 18) - Math.random() * 10,
+                        //x: width / 2,
+                        //y: height / 18,
+                        size: 0.7 + Math.random() * 0.25,
+                        speed: 15,
+                        direction: 1,
+                        alpha: 1.0,
+                        angle: 10,
+                        deployed: 0,
+                        isGrounded: false,
+                        isBeaming: true
+                    });
+                }
+            }
+
+            // Harvester
+            if (uiState.gameLevel >= 0) {
                 backgroundObjects.push({
-                    type: 'Radar',
-                    x: midPointX,
-                    y: 0, // isGrounded logic handles the Y and Angle automatically
-                    size: 1.0,
-                    speed: 0,
+                    type: 'Harvester',
+                    x: width * Math.random(), // Stationed in the central mining flats
+                    y: height * 0.9,
+                    size: 0.5,
+                    speed: 10, // Slow crawling speed
                     direction: 1,
-                    alpha: 0.8,
+                    alpha: 1.0,
                     angle: 0,
-                    isGrounded: true
+                    isGrounded: false,
+                    ringRotation: 0 // Track its own internal spinning mechanism
                 });
             }
+
+            // Clouds
+            for (let i = 0; i < o2Level / 10; i++) {
+                backgroundObjects.push({
+                    type: 'Cloud',
+                    // Random horizontal start position so they don't all clump up
+                    x: Math.random() * width,
+                    // Fixed heights: spaced out between 5% and 25% of the screen height
+                    y: (height / 2.5) + (i * (height / 90)),
+                    size: 0.4 + Math.random() * 0.5,
+                    // Base speed of 8 + a random variance so they move "randomly" but always right
+                    speed: 8 + (Math.random() * 12),
+                    direction: 1, // Same general direction
+                    alpha: 0.1 + (Math.random() * 0.1), // Some more transparent than others
+                    angle: 0,
+                    isGrounded: false,
+                    isBeaming: false
+                });
+            }
+
+            // Farming Plots
+            if (uiState.gameLevel >= 0) {
+                for (let i = 0; i < 30; i++) {
+                    backgroundObjects.push({
+                        type: 'Farm',
+                        x: (width * 0.2) + (i * 200) + Math.random() * 100,
+                        y: height * 0.9 + Math.random() * 50,
+                        size: 0.2,
+                        speed: 0,
+                        direction: 1,
+                        alpha: 1.0,
+                        angle: 0,
+                        isGrounded: false
+                    });
+                }
+            }
+
+            // Trucks
+            // if (uiState.gameLevel >= 4) {
+            if (o2Level > 90) {
+                // Spawns 2 cargo trucks cruising across the crater plains
+                for (let i = 0; i < 2; i++) {
+                    backgroundObjects.push({
+                        type: 'LunarSemi',
+                        x: width * (0.15 + i * 0.5) + Math.random() * 150,
+                        y: height * .95,
+                        size: 0.5,
+                        speed: 100 + Math.random() * 6, // Noticeably faster than the harvester
+                        direction: Math.random() > 0.5 ? 1 : -1,
+                        alpha: 1.0,
+                        angle: 0,
+                        isGrounded: false,
+                        bounceTimer: Math.random() * Math.PI // Used for a subtle cabin suspension bounce effect
+                    });
+                }
+            }
+
+            // Bio Station
+            if (o2Level > 50) {
+                backgroundObjects.push({
+                    type: 'BioStation',
+                    x: Math.random() * width,
+                    y: height * 0.9,
+                    size: .75,
+                    alpha: 1.0,
+                    isGrounded: false,
+                    speed: 0,
+                    direction: 1
+                });
+            }
+
         }
+
 
         function deploySatellites() {
             if (gameOver || satInventory <= 0 || splashActive) return;
             if (satellites.length >= 300) { satInventory = 0; uiState.milestone = "CONSTELLATION AT CAPACITY"; return; }
             playSound('deploy'); doorOpen = true; satInventory -= 10; totalDeployed += 10;
-            for (let i = 0; i < 10; i++) satellites.push({ x: ship.x, y: ship.y, vx: ship.xv + (Math.random() - 0.5) * 2, vy: ship.yv + (Math.random() - 0.5) * 2, size: 4, opacity: 1.0, heat: 0, vaporizeAlt: height - (300 + Math.random() * 150) });
+            for (let i = 0; i < 10; i++) satellites.push({
+                x: ship.x, y: ship.y, vx: ship.xv + (Math.random() - 0.5) * 2, vy: ship.yv + (Math.random() - 0.5) * 2,
+                size: 4, opacity: 1.0, heat: 0, vaporizeAlt: height - (300 + Math.random() * 150),
+                activated: false, activationTimer: 0, flicker: false
+            });
         }
 
         function triggerExplosion(x, y) {
-            if (audioCtx) playSound('crash');
-            for (let i = 0; i < 20; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160, life: 0.5, size: 2, plasma: true });
+            if (audioCtx) playSound('crash'); for (let i = 0; i < 20; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160, life: 0.5, size: 2, plasma: true });
             for (let i = 0; i < 10; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 60, vy: (Math.random() - 0.5) * 60, life: 1.0, size: 5, plasma: true });
             for (let i = 0; i < 3; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20, life: 2.0, size: 25, plasma: true });
         }
 
         function triggerSeparationSmoke(x, y) { for (let i = 0; i < 45; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 18, vy: (Math.random() - 0.5) * 18, life: 0.8, size: 3.5, plasma: false }); }
+
         function triggerLandingPuff(x, y) { for (let i = 0; i < 35; i++) smokeTrail.push({ x: x, y: y, vx: (Math.random() - 0.5) * 15, vy: (Math.random() - 0.5) * 10 - 5, life: 1.2, size: 4.5, plasma: false, isOrange: true }); }
 
-        // --- NEW BITMAP HUD DRAWING LOGIC ---
         function renderGaugeDualToHUD(ctx, x, y, val1, val2, max1, max2, label, type) {
-            const cx = x + 40, cy = y + 40;
-            ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.arc(cx, cy, 35, 0, Math.PI * 2); ctx.stroke();
-            ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI * 2); ctx.stroke();
-            ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#00ffff'; ctx.fillText(Math.round(val1), cx, cy - 18);
-            ctx.fillStyle = '#ffffff'; ctx.fillText(Math.round(val2), cx, cy + 2);
-            if (type === 'hspd') { const angle = -Math.PI / 2 + (Math.PI * 2 * (ORBITAL_VELOCITY / max1)); ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + 32 * Math.cos(angle), cy + 32 * Math.sin(angle)); ctx.lineTo(cx + 39 * Math.cos(angle), cy + 39 * Math.sin(angle)); ctx.stroke(); }
-            if (type === 'alt') { const targetAltVal = pads[0] ? pads[0].y - TARGET_ALT_Y : height; const angle = -Math.PI / 2 + (Math.PI * 2 * (targetAltVal / max1)); ctx.strokeStyle = '#ffff00'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + 32 * Math.cos(angle), cy + 32 * Math.sin(angle)); ctx.lineTo(cx + 39 * Math.cos(angle), cy + 39 * Math.sin(angle)); ctx.stroke(); }
+            const cx = x + 40, cy = y + 40; ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, 35, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI * 2); ctx.stroke();
+            ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#00ffff'; ctx.fillText(Math.round(val1), cx, cy - 18); ctx.fillStyle = '#ffffff'; ctx.fillText(Math.round(val2), cx, cy + 2);
+            if (type === 'hspd') { const a = -Math.PI / 2 + (Math.PI * 2 * (ORBITAL_VELOCITY / max1)); ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + 32 * Math.cos(a), cy + 32 * Math.sin(a)); ctx.lineTo(cx + 39 * Math.cos(a), cy + 39 * Math.sin(a)); ctx.stroke(); }
+            if (type === 'alt') { const tAV = pads[0] ? pads[0].y - TARGET_ALT_Y : height, a = -Math.PI / 2 + (Math.PI * 2 * (tAV / max1)); ctx.strokeStyle = '#ffff00'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + 32 * Math.cos(a), cy + 32 * Math.sin(a)); ctx.lineTo(cx + 39 * Math.cos(a), cy + 39 * Math.sin(a)); ctx.stroke(); }
             ctx.strokeStyle = '#00ffff'; ctx.beginPath(); ctx.arc(cx, cy, 35, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * Math.min(Math.abs(val1) / max1, 1))); ctx.stroke();
             ctx.strokeStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cx, cy, 28, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * Math.min(Math.abs(val2) / max2, 1))); ctx.stroke();
             ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#666'; ctx.fillText(label, cx, cy + 60);
         }
 
         function drawHUD() {
-            const hY = virtualPlayHeight;
-            vCtx.fillStyle = 'rgba(10, 10, 10, 0.95)'; vCtx.fillRect(0, hY, virtualWidth, virtualHUDHeight);
+            const hY = virtualPlayHeight; vCtx.fillStyle = 'rgba(10, 10, 10, 0.95)'; vCtx.fillRect(0, hY, virtualWidth, virtualHUDHeight);
             vCtx.strokeStyle = '#333'; vCtx.lineWidth = 1; vCtx.beginPath(); vCtx.moveTo(0, hY); vCtx.lineTo(virtualWidth, hY); vCtx.stroke();
-
-            // 1. Instructions
             vCtx.fillStyle = '#888'; vCtx.font = '18px sans-serif'; vCtx.textAlign = 'left'; vCtx.textBaseline = 'top';
-            vCtx.fillText("ARROWS: THRUST & ROTATION", 30, hY + 25);
-            vCtx.fillText("S KEY: STAGE SEPARATION", 30, hY + 50);
-            vCtx.fillText("D KEY: DEPLOY SATELLITES!", 30, hY + 75);
-            vCtx.fillText("A KEY: AUTO LAND ENABLE", 30, hY + 100);
-
-            // 2. Inventory
-            vCtx.textAlign = 'center'; vCtx.fillStyle = '#00ffff'; vCtx.font = 'bold 32px monospace';
-            vCtx.fillText(satInventory, 460, hY + 40);
-            vCtx.font = 'bold 10px sans-serif'; vCtx.fillStyle = '#666'; vCtx.fillText("SATS REMAINING", 460, hY + 95);
-
-            // 3. Gauges
-            renderGaugeDualToHUD(vCtx, 550, hY + 20, ship.xv, booster.xv, 80, 80, "HORIZONTAL SPD", 'hspd');
-            renderGaugeDualToHUD(vCtx, 680, hY + 20, ship.yv, booster.yv, 60, 60, "VERTICAL SPD", null);
-            const padS = pads.find(p => p.owner === 'Ship') || { y: height }; const padB = pads.find(p => p.owner === 'Booster') || { y: height };
-            renderGaugeDualToHUD(vCtx, 810, hY + 20, padS.y - (ship.y + 25), padB.y - (booster.y + 25), height, height, "ALTITUDE", 'alt');
-
-            // 4. Payload Zone
-            vCtx.strokeStyle = uiState.payloadInZone ? '#0f0' : '#444'; vCtx.lineWidth = 2;
-            vCtx.beginPath(); vCtx.arc(980, hY + 60, 40, 0, Math.PI * 2); vCtx.stroke();
-            vCtx.fillStyle = uiState.payloadInZone ? '#0f0' : '#666'; vCtx.font = 'bold 12px sans-serif';
-            vCtx.fillText(uiState.payloadText, 980, hY + 50);
-            vCtx.fillStyle = '#666'; vCtx.fillText("PAYLOAD ZONE", 980, hY + 115);
-
-            // 5. Fuel
+            vCtx.fillText("ARROWS: THRUST & ROTATION", 30, hY + 25); vCtx.fillText("S KEY: STAGE SEPARATION", 30, hY + 50); vCtx.fillText("D KEY: DEPLOY SATELLITES!", 30, hY + 75); vCtx.fillText("A KEY: AUTO LAND ENABLE", 30, hY + 100);
+            vCtx.textAlign = 'center'; vCtx.fillStyle = '#00ffff'; vCtx.font = 'bold 32px monospace'; vCtx.fillText(satInventory, 460, hY + 40); vCtx.font = 'bold 10px sans-serif'; vCtx.fillStyle = '#666'; vCtx.fillText("SATS REMAINING", 460, hY + 95);
+            renderGaugeDualToHUD(vCtx, 550, hY + 20, ship.xv, booster.xv, 80, 80, "HORIZONTAL SPD", 'hspd'); renderGaugeDualToHUD(vCtx, 680, hY + 20, ship.yv, booster.yv, 60, 60, "VERTICAL SPD", null);
+            const pS = pads.find(p => p.owner === 'Ship') || { y: height }, pB = pads.find(p => p.owner === 'Booster') || { y: height };
+            renderGaugeDualToHUD(vCtx, 810, hY + 20, pS.y - (ship.y + 25), pB.y - (booster.y + 25), height, height, "ALTITUDE", 'alt');
+            vCtx.strokeStyle = uiState.payloadInZone ? '#0f0' : '#444'; vCtx.lineWidth = 2; vCtx.beginPath(); vCtx.arc(980, hY + 60, 40, 0, Math.PI * 2); vCtx.stroke();
+            vCtx.fillStyle = uiState.payloadInZone ? '#0f0' : '#666'; vCtx.font = 'bold 12px sans-serif'; vCtx.fillText(uiState.payloadText, 980, hY + 50); vCtx.fillText("PAYLOAD ZONE", 980, hY + 115);
             renderGaugeDualToHUD(vCtx, 1070, hY + 20, ship.fuel, booster.fuel, 500, 500, "PROPELLANT", null);
 
-            // 6. Mission Time
-            vCtx.fillStyle = '#00ffff'; vCtx.font = '16px monospace';
-            vCtx.fillText(uiState.timer, 1220, hY + 65);
-            vCtx.font = 'bold 10px sans-serif'; vCtx.fillStyle = '#666'; vCtx.fillText("MISSION TIME", 1220, hY + 115);
 
-            // 7. Auto Land
-            const active = ship.autopilot; vCtx.strokeStyle = active ? '#0f0' : '#333'; vCtx.lineWidth = 4;
-            vCtx.beginPath(); vCtx.arc(1340, hY + 60, 35, 0, Math.PI * 2); vCtx.stroke();
-            vCtx.fillStyle = active ? `rgba(0, 255, 0, ${0.3 + Math.sin(pulseAngle) * 0.2})` : '#111';
-            vCtx.beginPath(); vCtx.arc(1340, hY + 60, 15, 0, Math.PI * 2); vCtx.fill();
-            vCtx.fillStyle = '#fff'; vCtx.font = '10px Arial'; vCtx.fillText(active ? "AUTO" : "MANUAL", 1340, hY + 65);
-            vCtx.fillStyle = '#666'; vCtx.fillText("AUTOLAND [A]", 1340, hY + 115);
+            //vCtx.fillStyle = '#00ffff'; vCtx.font = '16px monospace'; vCtx.fillText(uiState.timer, 1220, hY + 65); vCtx.font = 'bold 10px sans-serif'; vCtx.fillStyle = '#666'; vCtx.fillText("MISSION TIME", 1220, hY + 115);
+            drawAttitudeIndicator(vCtx, 1220, hY + 60, ship, booster);
 
-            // 8. Network Ops
-            const cxB = 1480, cyB = hY + 60; vCtx.strokeStyle = '#1a1a1a'; vCtx.lineWidth = 6;
-            vCtx.beginPath(); vCtx.arc(cxB, cyB, 32, Math.PI * 0.8, Math.PI * 2.2); vCtx.stroke();
-            const pct = Math.min(uiState.mbps / 200, 1);
-            const grad = vCtx.createLinearGradient(cxB - 40, cyB, cxB + 40, cyB); grad.addColorStop(0, '#ff00ff'); grad.addColorStop(1, '#00ffff');
+            const act = ship.autopilot; vCtx.strokeStyle = act ? '#0f0' : '#333'; vCtx.lineWidth = 4; vCtx.beginPath(); vCtx.arc(1340, hY + 60, 35, 0, Math.PI * 2); vCtx.stroke();
+            vCtx.fillStyle = act ? `rgba(0, 255, 0, ${0.3 + Math.sin(pulseAngle) * 0.2})` : '#111'; vCtx.beginPath(); vCtx.arc(1340, hY + 60, 15, 0, Math.PI * 2); vCtx.fill();
+            vCtx.fillStyle = '#fff'; vCtx.font = '10px Arial'; vCtx.fillText(act ? "AUTO" : "MANUAL", 1340, hY + 65); vCtx.fillStyle = '#666'; vCtx.fillText("AUTOLAND [A]", 1340, hY + 115);
+            var cxB = 1480, cyB = hY + 60; vCtx.strokeStyle = '#1a1a1a'; vCtx.lineWidth = 6; vCtx.beginPath(); vCtx.arc(cxB, cyB, 32, Math.PI * 0.8, Math.PI * 2.2); vCtx.stroke();
+            var pct = Math.min(uiState.mbps / 200, 1), grad = vCtx.createLinearGradient(cxB - 40, cyB, cxB + 40, cyB); grad.addColorStop(0, '#ff00ff'); grad.addColorStop(1, '#00ffff');
             vCtx.strokeStyle = grad; vCtx.beginPath(); vCtx.arc(cxB, cyB, 32, Math.PI * 0.8, Math.PI * 0.8 + (Math.PI * 1.4 * pct)); vCtx.stroke();
-            vCtx.fillStyle = '#ff00ff'; vCtx.font = 'bold 15px monospace'; vCtx.fillText(Math.floor(uiState.mbps), cxB, cyB + 12);
-            vCtx.font = '12px monospace'; vCtx.fillText("MBPS", cxB, cyB + 25); vCtx.fillStyle = '#666'; vCtx.font = 'bold 10px sans-serif'; vCtx.fillText("BANDWIDTH", cxB, hY + 115);
 
-            vCtx.textAlign = 'left'; vCtx.fillStyle = '#ff00ff'; vCtx.font = 'bold 20px monospace';
-            vCtx.fillText(`SATS: ${uiState.satCount}`, 1600, hY + 50);
-            vCtx.font = '14px monospace'; vCtx.fillText(uiState.milestone, 1600, hY + 75);
-            vCtx.fillStyle = '#666'; vCtx.font = 'bold 10px sans-serif'; vCtx.fillText("NETWORK OPS", 1600, hY + 115);
+            //vCtx.fillStyle = '#ff00ff'; vCtx.font = 'bold 15px monospace'; vCtx.fillText(Math.floor(uiState.mbps), cxB, cyB + 12); vCtx.font = '12px monospace'; vCtx.fillText("MBPS", cxB, cyB + 25);
+            //vCtx.fillStyle = '#666'; vCtx.font = 'bold 10px sans-serif'; vCtx.fillText("BANDWIDTH", cxB, hY + 115); vCtx.textAlign = 'left'; vCtx.fillStyle = '#ff00ff'; vCtx.font = 'bold 20px monospace';
+            //vCtx.fillText(`SATS: ${uiState.satCount} : 300`, 1600, hY + 50); vCtx.font = '14px monospace'; vCtx.fillText(uiState.milestone, 1600, hY + 75); vCtx.fillStyle = '#666'; vCtx.font = 'bold 10px sans-serif'; vCtx.fillText("NETWORK OPS", 1600, hY + 115);
+
+            // --- FAR RIGHT PANEL: NETWORK OPS & O2 METRICS ---
+            cxB = 1480, cyB = hY + 60;
+            vCtx.strokeStyle = '#1a1a1a'; vCtx.lineWidth = 6; vCtx.beginPath(); vCtx.arc(cxB, cyB, 32, Math.PI * 0.8, Math.PI * 2.2); vCtx.stroke();
+            pct = Math.min(uiState.mbps / 200, 1), grad = vCtx.createLinearGradient(cxB - 40, cyB, cxB + 40, cyB); grad.addColorStop(0, '#ff00ff'); grad.addColorStop(1, '#00ffff');
+            vCtx.strokeStyle = grad; vCtx.beginPath(); vCtx.arc(cxB, cyB, 32, Math.PI * 0.8, Math.PI * 0.8 + (Math.PI * 1.4 * pct)); vCtx.stroke();
+            vCtx.fillStyle = '#ff00ff'; vCtx.font = 'bold 15px monospace'; vCtx.fillText(Math.floor(uiState.mbps), cxB, cyB + 12); vCtx.font = '12px monospace'; vCtx.fillText("MBPS", cxB, cyB + 25);
+            vCtx.fillStyle = '#666'; vCtx.font = 'bold 10px sans-serif'; vCtx.fillText("BANDWIDTH", cxB, hY + 115);
+
+            vCtx.textAlign = 'left';
+
+            // NEW: Pretty, large, cyan O2 Atmosphere readout placed cleanly above the network stats
+            vCtx.fillStyle = '#00ffff';
+            vCtx.font = 'bold 24px monospace';
+            vCtx.fillText(`ATMOSPHERE O2: ${Math.floor(o2Level)}%`, 1600, hY + 22);
+
+            // Existing Network Ops Readouts (bumped down slightly so everything fits comfortably)
+            vCtx.fillStyle = '#ff00ff';
+            vCtx.font = 'bold 20px monospace';
+            vCtx.fillText(`SATS: ${uiState.satCount} : 300`, 1600, hY + 52);
+            vCtx.font = '14px monospace';
+            vCtx.fillText(uiState.milestone, 1600, hY + 77);
+            vCtx.fillStyle = '#666';
+            vCtx.font = 'bold 10px sans-serif';
+            vCtx.fillText("NETWORK OPS", 1600, hY + 115);
+
+
+
+
+
         }
 
+
+        function drawAttitudeIndicator(ctx, x, y, ship, booster) {
+            const radius = 35;
+
+            ctx.save();
+            ctx.translate(x, y);
+
+            // 1. Outer Circular Ring
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // 2. Inner Horizon Ellipse
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, radius, radius * 0.3, 0, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Helper to draw a larger pointer
+            const drawPointer = (obj, color, sizeFactor) => {
+                ctx.save();
+                ctx.rotate(obj.angle + Math.PI / 2);
+
+                ctx.fillStyle = color;
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 1;
+
+                // Larger dimensions
+                const tip = -radius * sizeFactor;
+                const base = tip + 16;
+                const width = 7;
+
+                ctx.beginPath();
+                ctx.moveTo(0, tip);           // Nose
+                ctx.lineTo(width, base);      // Fin Right
+                ctx.lineTo(0, base - 5);      // Tail notch
+                ctx.lineTo(-width, base);     // Fin Left
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.restore();
+            };
+
+            // Draw Ship Pointer (Cyan) - Full size
+            if (!ship.exploded) {
+                drawPointer(ship, '#00ffff', 1.1);
+            }
+
+            // Draw Booster Pointer (White) - 85% size to differentiate
+            if (!booster.exploded) {
+                drawPointer(booster, '#ffffff', 0.85);
+            }
+
+            ctx.restore();
+        }
+
+
+
         function runAI(obj, dt) {
-            if (splashActive) return;
-            let fuelTarget = (obj === ship && !separated) ? booster : obj;
-            if (fuelTarget.fuel <= 0 || obj.landed || obj.crashed) { obj.thrusting = false; return; }
-            const myPad = pads.find(p => p.owner === obj.id); if (!myPad) return;
-            const padCenterX = (myPad.x1 + myPad.x2) / 2;
-            const dx = padCenterX - obj.x; const xvError = (dx * 0.26) - (obj.xv * 0.9);
-            let targetAngle = -Math.PI / 2 + (xvError * 0.05);
-            targetAngle = Math.max(-Math.PI / 2 - 0.85, Math.min(-Math.PI / 2 + 0.85, targetAngle));
-            const angleErr = targetAngle - obj.angle; const rotStep = MAX_ROT_SPEED * dt;
-            if (Math.abs(angleErr) < rotStep) obj.angle = targetAngle; else obj.angle += Math.sign(angleErr) * rotStep;
-            const targetOffset = (obj.id === 'Booster' && separated) ? 36 : 25;
-            const altitude = myPad.y - (obj.y + targetOffset);
-            let targetYv = (altitude < 40 && Math.abs(dx) > 35) ? -2 : Math.sqrt(Math.max(0, altitude) * 5.0) + 7;
-            if (targetYv > 80) targetYv = 80;
-            if (obj.yv > targetYv + 1) { obj.xv += (Math.cos(obj.angle) * THRUST) * dt; obj.yv += (Math.sin(obj.angle) * THRUST) * dt; if (obj === ship && !separated) booster.fuel -= 50 * dt; else obj.fuel -= 50 * dt; obj.thrusting = true; }
-            else obj.thrusting = false;
+            if (splashActive) return; let fT = (obj === ship && !separated) ? booster : obj; if (fT.fuel <= 0 || obj.landed || obj.crashed) { obj.thrusting = false; return; }
+            const pad = pads.find(p => p.owner === obj.id); if (!pad) return; const pCX = (pad.x1 + pad.x2) / 2, dx = pCX - obj.x, xvE = (dx * 0.26) - (obj.xv * 0.9);
+            let tA = -Math.PI / 2 + (xvE * 0.05); tA = Math.max(-Math.PI / 2 - 0.85, Math.min(-Math.PI / 2 + 0.85, tA));
+            const aE = tA - obj.angle, rS = MAX_ROT_SPEED * dt; if (Math.abs(aE) < rS) obj.angle = tA; else obj.angle += Math.sign(aE) * rS;
+            const tO = (obj.id === 'Booster' && separated) ? 36 : 25, alt = pad.y - (obj.y + tO);
+            let tYv = (alt < 40 && Math.abs(dx) > 35) ? -2 : Math.sqrt(Math.max(0, alt) * 5.0) + 7; if (tYv > 80) tYv = 80;
+            if (obj.yv > tYv + 1) { obj.xv += (Math.cos(obj.angle) * THRUST) * dt; obj.yv += (Math.sin(obj.angle) * THRUST) * dt; if (obj === ship && !separated) booster.fuel -= 50 * dt; else obj.fuel -= 50 * dt; obj.thrusting = true; } else obj.thrusting = false;
         }
 
         function update(time) {
-            if (!lastTime) lastTime = time;
-            const dt = Math.min((time - lastTime) / 1000, 0.1) * TIME_SCALE;
-            lastTime = time;
+            if (!lastTime) lastTime = time; const dt = Math.min((time - lastTime) / 1000, 0.1) * TIME_SCALE; lastTime = time;
+            if (gameOver || splashActive) { timeSinceGameOver += (dt * 1000); if (timeSinceGameOver > 5000) { resetGame(); gameOver = false; splashActive = false; timeSinceGameOver = 0; } if (splashActive) { draw(); requestAnimationFrame(update); return; } }
+            [ship, booster].forEach(obj => { const dFS = Math.abs(launchPad.y - (obj.y + (obj.id === 'Booster' ? 25 : 69))); if ((dFS < 10 || obj.landed) && !obj.exploded && Math.random() > 0.9) smokeTrail.push({ x: obj.x + 4, y: obj.y + 8, vx: 30 + Math.random() * 10, vy: -0.5 + Math.random(), life: 0.5, size: 0.25, plasma: false, isOrange: false }); });
 
-            if (gameOver || splashActive) {
-                timeSinceGameOver += (dt * 1000);
-                if (timeSinceGameOver > 5000) { resetGame(); gameOver = false; splashActive = false; timeSinceGameOver = 0; }
-                if (splashActive) { draw(); requestAnimationFrame(update); return; }
-            }
-
-            demoUpdate();
+            // Update demo if enabled
+            if (demoEnabled) demoUpdate();
 
             if (!gameOver && !splashActive) {
                 if (ship.autopilot) runAI(ship, dt); if (separated && booster.autopilot) runAI(booster, dt);
                 if (!separated && !ship.autopilot) {
-                    if (keys['ArrowUp'] && booster.fuel > 0) { ship.xv += (Math.cos(ship.angle) * THRUST) * dt; ship.yv += (Math.sin(ship.angle) * THRUST) * dt; booster.fuel -= 60 * dt; ship.thrusting = true; booster.legsVisible = false; } else ship.thrusting = false;
-                    if (keys['ArrowLeft'] || keys['ArrowRight']) { rotKeyHeldTime += dt; const ramp = Math.min(0.2 + (rotKeyHeldTime / (0.4 * TIME_SCALE)) * 0.8, 1.0); const dir = keys['ArrowLeft'] ? -1 : 1; ship.angle += dir * MAX_ROT_SPEED * ramp * dt; } else rotKeyHeldTime = 0;
+                    if (activeInputs['ArrowUp'] && booster.fuel > 0) { ship.xv += (Math.cos(ship.angle) * THRUST) * dt; ship.yv += (Math.sin(ship.angle) * THRUST) * dt; booster.fuel -= 50 * dt; ship.thrusting = true; booster.legsVisible = false; } else ship.thrusting = false;
+                    if (activeInputs['ArrowLeft'] || activeInputs['ArrowRight']) { rotKeyHeldTime += dt; const r = Math.min(0.2 + (rotKeyHeldTime / (0.4 * TIME_SCALE)) * 0.8, 1.0), d = activeInputs['ArrowLeft'] ? -1 : 1; ship.angle += d * MAX_ROT_SPEED * r * dt; } else rotKeyHeldTime = 0;
                 } else if (separated && !ship.autopilot) {
-                    if (keys['ArrowUp'] && ship.fuel > 0) { ship.xv += (Math.cos(ship.angle) * THRUST) * dt; ship.yv += (Math.sin(ship.angle) * THRUST) * dt; ship.fuel -= 60 * dt; ship.thrusting = true; } else ship.thrusting = false;
-                    if (keys['ArrowLeft'] || keys['ArrowRight']) { rotKeyHeldTime += dt; const ramp = Math.min(0.2 + (rotKeyHeldTime / (0.4 * TIME_SCALE)) * 0.8, 1.0); const dir = keys['ArrowLeft'] ? -1 : 1; ship.angle += dir * MAX_ROT_SPEED * ramp * dt; } else rotKeyHeldTime = 0;
+                    if (activeInputs['ArrowUp'] && ship.fuel > 0) { ship.xv += (Math.cos(ship.angle) * THRUST) * dt; ship.yv += (Math.sin(ship.angle) * THRUST) * dt; ship.fuel -= 60 * dt; ship.thrusting = true; } else ship.thrusting = false;
+                    if (activeInputs['ArrowLeft'] || activeInputs['ArrowRight']) { rotKeyHeldTime += dt; const r = Math.min(0.2 + (rotKeyHeldTime / (0.4 * TIME_SCALE)) * 0.8, 1.0), d = activeInputs['ArrowLeft'] ? -1 : 1; ship.angle += d * MAX_ROT_SPEED * r * dt; } else rotKeyHeldTime = 0;
                 }
-                if (!separated) {
-                    ship.yv += GRAVITY * dt; ship.x += ship.xv * dt; ship.y += ship.yv * dt; booster.angle = ship.angle; booster.xv = ship.xv; booster.yv = ship.yv; booster.x = ship.x + Math.cos(ship.angle + Math.PI) * 44; booster.y = ship.y + Math.sin(ship.angle + Math.PI) * 44;
-                    checkColl(booster); if (booster.crashed) ship.crashed = true;
-                    if (booster.yv === 0) { ship.yv = 0; ship.xv = booster.xv; ship.x = booster.x - Math.cos(booster.angle + Math.PI) * 44; ship.y = booster.y - Math.sin(booster.angle + Math.PI) * 44; if (booster.landed) ship.landed = true; }
-                } else {
-                    if (!ship.landed && !ship.crashed) { ship.yv += GRAVITY * dt; ship.x += ship.xv * dt; ship.y += ship.yv * dt; checkColl(ship); }
-                    if (!booster.landed && !booster.crashed) { booster.yv += GRAVITY * dt; booster.x += booster.xv * dt; booster.y += booster.yv * dt; checkColl(booster); }
-                }
+                if (!separated) { ship.yv += GRAVITY * dt; ship.x += ship.xv * dt; ship.y += ship.yv * dt; booster.angle = ship.angle; booster.xv = ship.xv; booster.yv = ship.yv; booster.x = ship.x + Math.cos(ship.angle + Math.PI) * 44; booster.y = ship.y + Math.sin(ship.angle + Math.PI) * 44; checkColl(booster); if (booster.crashed) ship.crashed = true; if (booster.yv === 0) { ship.yv = 0; ship.xv = booster.xv; ship.x = booster.x - Math.cos(booster.angle + Math.PI) * 44; ship.y = booster.y - Math.sin(booster.angle + Math.PI) * 44; if (booster.landed) ship.landed = true; } }
+                else { if (!ship.landed && !ship.crashed) { ship.yv += GRAVITY * dt; ship.x += ship.xv * dt; ship.y += ship.yv * dt; checkColl(ship); } if (!booster.landed && !booster.crashed) { booster.yv += GRAVITY * dt; booster.x += booster.xv * dt; booster.y += booster.yv * dt; checkColl(booster); } }
 
-                checkEagleColl(ship); checkEagleColl(booster);
+                // Eagle Collisions and Avoidane
+                checkEagleColl(ship);
+                checkEagleColl(booster);[ship, booster].forEach(obj => { if (!obj.exploded) { const aT = !separated ? (obj === booster && ship.thrusting) : obj.thrusting, yO = (obj === booster) ? 36 : 30; if (aT && !obj.landed && Math.random() > 0.2) smokeTrail.push({ x: obj.x + Math.cos(obj.angle + Math.PI) * yO, y: obj.y + Math.sin(obj.angle + Math.PI) * yO, vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5, life: 1, size: 2.5 }); } if (obj.crashed && !obj.exploded) { triggerExplosion(obj.x, obj.y); obj.exploded = true; } });
 
-                if (booster.y > height + 20 || booster.x < -LOST_BUFFER || booster.x > width + LOST_BUFFER || booster.y < -LOST_BUFFER) { booster.crashed = true; ship.crashed = true; }
-                if (ship.y > height + 20 || ship.x < -LOST_BUFFER || ship.x > width + LOST_BUFFER || ship.y < -LOST_BUFFER) { ship.crashed = true; booster.crashed = true; }
 
-                // --- RESTORED SMOKE GENERATOR (THRUST) ---
-                [ship, booster].forEach(obj => { if (obj.exploded) return; const activeThrust = !separated ? (obj === booster && ship.thrusting) : obj.thrusting; const yOff = (obj === booster) ? 36 : 30; if (activeThrust && !obj.landed && Math.random() > 0.2) smokeTrail.push({ x: obj.x + Math.cos(obj.angle + Math.PI) * yOff, y: obj.y + Math.sin(obj.angle + Math.PI) * yOff, vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5, life: 1, size: 2.5 }); });
+                // --- UPDATE THREE-BODY SYSTEM ---
+                if (!splashActive && !gameOver) {
+                    threeBodyTime += dt * threeBodySystem.speed;
 
-                // --- RESTORED PRE-LAUNCH VENTING ---
-                // --- DYNAMIC PRE-LAUNCH VENTING ---
-                // Calculate altitude specifically above the launch pad
-                const altAboveStart = launchPad.y - (ship.y + 69);
+                    const offsets = [0, 2.094, 4.188];
 
-                // Trigger venting if the ship is within 50px of the pad and hasn't separated yet
-                if (!separated && altAboveStart < 50 && altAboveStart > -10 && Math.random() > 0.9) {
-                    smokeTrail.push({
-                        x: ship.x + 7,
-                        y: ship.y + 18,
-                        vx: 3 + Math.random() * 3,
-                        vy: -0.5 + Math.random(),
-                        life: 0.8,
-                        size: 1.0,
-                        plasma: false,
-                        isOrange: false
+                    threeBodySystem.suns.forEach((sun, index) => {
+                        const t = threeBodyTime + offsets[index];
+
+                        const rawX = Math.sin(t);
+                        const rawY = Math.sin(2 * t) / 2;
+
+                        const angleOffset = 0.2;
+                        sun.x = threeBodySystem.centerX + (rawX * Math.cos(angleOffset) - rawY * Math.sin(angleOffset)) * threeBodySystem.scale;
+                        sun.y = threeBodySystem.centerY + (rawX * Math.sin(angleOffset) + rawY * Math.cos(angleOffset)) * threeBodySystem.scale;
+
+                        // SUB-SAMPLING THE TRAIL: Only save a node point every 2 frames
+                        // This spreads the array points out across the screen to create a massive tail!
+                        if (Math.floor(performance.now() / 16) % 2 === 0) {
+                            sun.trail.push({ x: sun.x, y: sun.y });
+                            if (sun.trail.length > 200) sun.trail.shift(); // Massive trail memory history length
+                        }
                     });
                 }
 
-                [ship, booster].forEach(obj => { if (obj.crashed && !obj.exploded) { triggerExplosion(obj.x, obj.y); obj.exploded = true; } });
+                // Booster Configuration
+                if (satellites.length >= 300 && booster.config === 'standard') {
+                    booster.config = 'heavy';
+                }
 
-                if ((separated && (ship.landed || ship.crashed) && (booster.landed || booster.crashed)) || (!separated && (ship.landed || ship.crashed))) {
-                    if (!gameOver) {
-                        gameOver = true; timeSinceGameOver = 0; const landSuccess = ship.landed && (separated ? booster.landed : true); const win = landSuccess && totalDeployed > 0;
-                        if (win) { msgBox.innerHTML = `MISSION SUCCESS<br><span style='font-size:16px; color:#fff;'>RECOVERY COMPLETE</span>`; playSound('success'); } else { msgBox.innerHTML = "MISSION FAILURE"; }
-                        msgBox.style.color = win ? "#0f0" : "#f00"; msgBox.style.display = "block";
+
+                // Check for existence of Terraform Station AND a fully deployed Space Array
+                const hasTerraFormStation = backgroundObjects.some(obj => obj.type === 'Terraform');
+                const hasActiveSpaceArray = backgroundObjects.some(obj => obj.type === 'SpaceArray' && obj.deployed >= 100);
+
+                if (hasTerraFormStation && hasActiveSpaceArray) {
+                    // Increase O2 only when the station is actively receiving beamed power
+                    if (o2Level < 100) o2Level += 0.01;
+                }
+
+                // --- COUNT ACTIVE POWER SATELLITES ---
+                const activeSpaceArrays = backgroundObjects.filter(b => b.type === 'SpaceArray' && b.deployed >= 100).length;
+
+                // Background Processing
+                backgroundObjects.forEach(obj => {
+
+                    // --- IMPROVED RADAR PREDICTIVE FIRING ---
+                    if (obj.type === 'Radar' && alienShip.active) {
+                        if (!obj.fireTimer) obj.fireTimer = 0;
+                        if (!obj.burstCount) obj.burstCount = 0;
+                        if (typeof obj.burstSpread === 'undefined') obj.burstSpread = 0;
+
+                        obj.fireTimer += dt;
+
+                        // Burst of 5, ultra-fast 0.04s interval (Gatling speed)
+                        if (obj.burstCount < 5 && obj.fireTimer > 0.04) {
+
+                            const bulletSpeedY = 550;
+
+                            // Only generate a new random spread on the very first shot of the burst
+                            if (obj.burstCount === 0) {
+                                // --- TIGHTENED ACCURACY ---
+                                // Reduced from 600 to 400. It will still miss, but the 
+                                // cone of fire is narrower, increasing the hit rate slightly.
+                                obj.burstSpread = (Math.random() - 0.5) * 400;
+                            }
+
+                            const distY = Math.abs(alienShip.y - (obj.y - 40));
+                            const travelTime = distY / bulletSpeedY;
+
+                            // Predict target with a slight 10% lead variance
+                            const predictedX = alienShip.x + (alienShip.speed * alienShip.direction * travelTime * 1.1);
+
+                            // Apply the locked burst spread so all 5 bullets follow the exact same path
+                            const targetX = predictedX + obj.burstSpread;
+
+                            // Fire at the locked target location
+                            radarBullets.push({
+                                x: obj.x,
+                                y: obj.y - 40,
+                                vx: (targetX - obj.x) / travelTime,
+                                vy: -bulletSpeedY
+                            });
+
+                            obj.burstCount++;
+                            obj.fireTimer = 0;
+                            if (audioCtx) playSound('sep');
+
+                        } else if (obj.burstCount >= 5 && obj.fireTimer > 1.5) {
+                            // --- REDUCED COOLDOWN ---
+                            // Dropped from 3.0 to 1.5 seconds so it fires twice as often
+                            obj.burstCount = 0;
+                        }
                     }
+
+
+                    // --- NEW TERRAFORM STATION DYNAMICS ---
+                    if (obj.type === 'Terraform') {
+                        // Initialize properties if they don't exist yet
+                        if (typeof obj.powerHeat === 'undefined') obj.powerHeat = 0;
+                        if (typeof obj.currentDepth === 'undefined') obj.currentDepth = 30; // Starts shallow
+
+                        // 1. Heat Ramp Up/Down (Takes ~2 seconds to reach max heat)
+                        if (activeSpaceArrays > 0) {
+                            obj.powerHeat = Math.min(1.0, obj.powerHeat + (dt / 2.0));
+                        } else {
+                            obj.powerHeat = Math.max(0.0, obj.powerHeat - (dt / 2.0));
+                        }
+
+                        // 2. Depth Calculation (Base 30px + 35px per active array)
+                        const targetDepth = 30 + (activeSpaceArrays * 35);
+
+                        // Smoothly animate the drills sliding down or retracting
+                        obj.currentDepth += (targetDepth - obj.currentDepth) * 2 * dt;
+                    }
+                });
+
+                // Update and Detect Collisions
+                for (let i = radarBullets.length - 1; i >= 0; i--) {
+                    let b = radarBullets[i];
+                    b.x += b.vx * dt;
+                    b.y += b.vy * dt;
+
+                    // Hit detection on Alien Ship
+                    if (alienShip.active &&
+                        b.x > alienShip.x - 40 && b.x < alienShip.x + 40 &&
+                        b.y > alienShip.y - 25 && b.y < alienShip.y + 25) {
+
+                        alienShip.active = false; // Destroy alien
+                        alienShip.nextSpawnTime = performance.now() + 15000;
+                        radarBullets.splice(i, 1);
+                        triggerExplosion(alienShip.x, alienShip.y);
+                        stopWacaWaca();
+                        continue;
+                    }
+
+                    // Remove if off-screen
+                    if (b.y < 0) radarBullets.splice(i, 1);
+                }
+            }
+            // Game over check
+            if ((separated && (ship.landed || ship.crashed) && (booster.landed || booster.crashed)) || (!separated && (ship.landed || ship.crashed))) {
+                if (!gameOver) {
+                    gameOver = true; timeSinceGameOver = 0; const lS = ship.landed && (separated ? booster.landed : true), win = lS && totalDeployed > 0;
+                    msgBox.innerHTML = win ? "MISSION SUCCESS!!" : "MISSION FAILURE"; msgBox.style.color = win ? "#0f0" : "#f00"; msgBox.style.display = "block"; if (win) playSound('success');
+                }
+            }
+            // Game Won!
+            const currentStores = backgroundObjects.filter(obj => obj.type === 'Store').length;
+            if (currentStores >= 200 && !gameOver) {
+                gameOver = true;
+                timeSinceGameOver = 0;
+                msgBox.innerHTML = "GAME OVER! CORPORATE MONOPOLY ACHIEVED!!"; // Same style message
+                msgBox.style.color = "#0f0"; // Green for success
+                msgBox.style.display = "block";
+                playSound('success'); // Uses your game's victory fanfare
+            }
+
+
+
+
+
+            if (!splashActive) {
+                [ship, booster].forEach(obj => { if ((obj.landed || obj.yv === 0) && !obj.crashed && !obj.exploded) { let aD = -Math.PI / 2 - obj.angle; while (aD < -Math.PI) aD += Math.PI * 2; while (aD > Math.PI) aD -= Math.PI * 2; if (Math.abs(aD) > 0.001) obj.angle += aD * 4.5 * dt; else obj.angle = -Math.PI / 2; } });
+
+                // Eagle Evasion
+                if (backgroundObjects.some(o => o.type === 'Radar')) handleEagleEvasion();
+
+                // Update Background Objects
+                backgroundObjects.forEach(obj => {
+
+                    // Basic Movement
+                    obj.x += obj.speed * obj.direction * dt;
+
+                    if (obj.isGrounded) {
+                        const p1 = terrain.find(p => p.x > obj.x);
+                        if (p1) {
+                            const p0 = terrain[terrain.indexOf(p1) - 1] || terrain[0],
+                                pct = (obj.x - p0.x) / (p1.x - p0.x);
+
+                            // If it's a Terraform station, let it sit 5px BELOW the line
+                            // Otherwise, keep the -5 (slightly above) for things like Buggies
+                            let groundOffset = (obj.type === 'Terraform') ? 5 : -5;
+                            groundOffset = (obj.type === 'Radar') ? 5 : -5;
+
+                            obj.y = p0.y + (p1.y - p0.y) * pct + groundOffset;
+                            obj.angle = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+                        }
+                    }
+
+                    // Object Movements
+                    if (obj.x < 0) obj.direction = 1; if (obj.x > width) obj.direction = -1;
+                    if (obj.type === 'Eagle' && !obj.crashed && Math.random() > 0.8) smokeTrail.push({ x: obj.x + (70 * obj.size * (obj.direction * -1)), y: obj.y, vx: (Math.random() - 0.5) * 2 - (obj.direction * 2), vy: (Math.random() - 0.5) * 2, life: 0.3, size: 1.2, plasma: false, isOrange: false });
+                    // Specific logic for the SpaceArray (Drifting Satellite)
+                    if (obj.type === 'SpaceArray') {
+                        // Horizontal Wrap-around for the SpaceArray
+                        if (obj.x > width + 150) {
+                            obj.x = -150;
+                        } else if (obj.x < -150) {
+                            obj.x = width + 150;
+                        }
+                        if (obj.deployed < 100) obj.deployed += 0.1;
+
+                        // Optional: Add a slight vertical "bobbing" for a space effect
+                        obj.y += Math.sin(performance.now() / 1000) * 0.2;
+                    }
+
+                    if (obj.type === 'Harvester') groundOffset = 2;
+                    if (obj.type === 'Harvester') {
+                        obj.ringRotation += 1.5 * dt; // Controls spin speed of the bucket ring
+                    }
+
+                    if (obj.type === 'LunarSemi') {
+                        obj.bounceTimer += 12 * dt;
+
+                        // 1. Get the actual live count of stores
+                        var storeCount = backgroundObjects.filter(obj => obj.type === 'Store').length;
+
+                        // 2. Enforce a strict absolute cap of 400 total stores
+                        if (storeCount < 400) {
+
+                            // Prevent multiplier collapse if count is 0
+                            var spawnMultiplier = storeCount === 0 ? 1 : storeCount;
+
+                            // Cap the speed of chaotic generation if it gets too wild after 200
+                            if (spawnMultiplier > 200) spawnMultiplier = 200;
+
+                            // Check if chaos mode is active (> 200 stores)
+                            var spawnEverywhere = storeCount > 200;
+
+                            // Scale drop chance dynamically based on established colony size
+                            if (Math.random() < 0.0015 * spawnMultiplier) {
+                                playSound('build');
+
+                                // 3. Determine spatial positioning vectors 
+                                var finalX = spawnEverywhere ? Math.random() * virtualWidth : obj.x;
+                                var finalY = spawnEverywhere ? Math.random() * virtualPlayHeight : obj.y;
+
+                                backgroundObjects.push({
+                                    type: 'Store',
+                                    x: finalX,
+                                    y: finalY - Math.random() * 100,
+                                    size: 0.7 + Math.random() * 0.3 + spawnEverywhere * 2,
+                                    speed: 0,
+                                    direction: 1,
+                                    alpha: 1.0,
+                                    //angle:  1,
+                                    angle: (spawnEverywhere * Math.random() * 180 * Math.PI / 180),
+                                    // Crucial: Turn off ground terrain locking when floating in space
+                                    isGrounded: false,
+                                    logoIndex: Math.floor(Math.random() * 10), // Safe index up to 10 cached images
+                                    roadOffset: spawnEverywhere ? 0 : -2 + (Math.random() * 14)
+                                });
+                            }
+                        }
+                    }
+
+                });
+                cosmeticObjPulse += 0.05;
+
+                // --- ALIEN SHIP ENGINE (GLOBAL CONTINUOUS UPDATE) ---
+                const currentTime = performance.now();
+
+                // 1. Handle Spawning System (Allowed even if gameOver is true)
+                if (!alienShip.active && currentTime > alienShip.nextSpawnTime && !splashActive) {
+                    alienShip.active = true;
+                    alienShip.direction = Math.random() > 0.5 ? 1 : -1;
+                    alienShip.x = alienShip.direction === 1 ? -120 : virtualWidth + 120;
+                    alienShip.y = height * 0.08 + Math.random() * (height * 0.12);
+                    alienShip.shootTimer = 0;
+
+                    // Only play the sound if the player isn't stuck on the splash screen
+                    playWacaWaca(12.0);
+                }
+
+                // 2. Handle Active Movement and Laser Fires
+                if (alienShip.active) {
+                    alienShip.x += alienShip.speed * alienShip.direction * dt;
+
+                    if ((alienShip.direction === 1 && alienShip.x > virtualWidth + 150) ||
+                        (alienShip.direction === -1 && alienShip.x < -150)) {
+                        alienShip.active = false;
+                        alienShip.nextSpawnTime = currentTime + 12000 + Math.random() * 8000;
+                    }
+
+                    // Only fire lasers if the game is actively being played
+                    if (!gameOver) {
+                        alienShip.shootTimer += dt;
+                        if (alienShip.shootTimer > 3 + Math.random() * 1.5) {
+                            alienShip.shootTimer = 0;
+                            alienLasers.push({ x: alienShip.x, y: alienShip.y + 20, vy: 100, width: 4, height: 20 });
+                            if (audioCtx) playSound('sep');
+                        }
+                    }
+
+                }
+
+                // 3. Update Lasers and Check Target Hits
+                for (let i = alienLasers.length - 1; i >= 0; i--) {
+                    let laser = alienLasers[i];
+                    laser.y += laser.vy * dt;
+
+                    // const groundPoint = terrain.find(p => p.x > laser.x) || terrain[terrain.length - 1];
+                    // if (groundPoint && laser.y > groundPoint.y) {
+                    //     alienLasers.splice(i, 1);
+                    //     continue;
+                    // }
+
+
+                    const groundPoint = terrain.find(p => p.x > laser.x) || terrain[terrain.length - 1];
+                    if (groundPoint && laser.y > groundPoint.y) {
+
+                        // --- NEW: Draw Red Fireball on Impact ---
+                        for (let j = 0; j < 15; j++) {
+                            smokeTrail.push({
+                                x: laser.x,
+                                y: groundPoint.y, // Snap the explosion to the ground
+                                vx: (Math.random() - 0.5) * 120, // Splash outwards horizontally
+                                vy: -(Math.random() * 100 + 20), // Splash violently upwards
+                                life: 0.6 + Math.random() * 0.4,
+                                size: 4 + Math.random() * 6,
+                                plasma: true,  // Piggyback on your existing fast-fade physics
+                                isRed: true    // Custom flag to color it red in the draw loop
+                            });
+                        }
+                        if (audioCtx) playSound('laserHit');
+                        alienLasers.splice(i, 1);
+                        continue;
+                    }
+
+                    // Only register damage hits if the game isn't already over
+                    [ship, booster].forEach(target => {
+                        if (!target.crashed && !target.exploded) {
+                            const tLeft = target.x - target.width / 2;
+                            const tRight = target.x + target.width / 2;
+                            const tTop = target.y - target.height / 2;
+                            const tBottom = target.y + target.height / 2;
+
+                            if (laser.x >= tLeft && laser.x <= tRight && laser.y >= tTop && laser.y <= tBottom) {
+                                target.crashed = true;
+                                if (!separated) booster.crashed = true;
+                                alienLasers.splice(i, 1);
+                            }
+                        }
+                    });
+
                 }
             }
 
-            if (!splashActive) { [ship, booster].forEach(obj => { if ((obj.landed || obj.yv === 0) && !obj.crashed && !obj.exploded) { const targetAngle = -Math.PI / 2; let angleDiff = targetAngle - obj.angle; while (angleDiff < -Math.PI) angleDiff += Math.PI * 2; while (angleDiff > Math.PI) angleDiff -= Math.PI * 2; if (Math.abs(angleDiff) > 0.001) obj.angle += angleDiff * 4.5 * dt; else obj.angle = targetAngle; } }); }
-            if (audioCtx) { const anyThrusting = ship.thrusting || (separated && booster.thrusting); const bothLanded = separated ? (ship.landed && booster.landed) : ship.landed; setEngineVolume((anyThrusting && !bothLanded && !gameOver) ? 1.0 : 0); }
-            if (!splashActive) {
-                handleEagleEvasion();
-                backgroundObjects.forEach(obj => {
-                    obj.x += obj.speed * obj.direction * dt;
-                    if (obj.isGrounded) {
-                        const p1 = terrain.find(p => p.x > obj.x);
-                        if (p1) { const p0 = terrain[terrain.indexOf(p1) - 1] || terrain[0]; const pct = (obj.x - p0.x) / (p1.x - p0.x); obj.y = p0.y + (p1.y - p0.y) * pct - 5; obj.angle = Math.atan2(p1.y - p0.y, p1.x - p0.x); }
-                    } if (obj.x < 0) obj.direction = 1; if (obj.x > width) obj.direction = -1; if (obj.type === 'Eagle' && !obj.crashed && Math.random() > 0.8) { smokeTrail.push({ x: obj.x + (70 * obj.size * (obj.direction * -1)), y: obj.y, vx: (Math.random() - 0.5) * 2 - (obj.direction * 2), vy: (Math.random() - 0.5) * 2, life: 0.3, size: 1.2, plasma: false, isOrange: false }); }
-                }); cosmeticObjPulse += 0.05;
-            }
-            legacySats.forEach((s) => { const altDiff = TARGET_ALT_Y - s.y; if (Math.abs(altDiff) < 150) s.vy += altDiff * 0.01 * dt; s.x += s.vx * dt; s.y += s.vy * dt; if (s.x > width + 50) s.x = -50; });
-            for (let i = satellites.length - 1; i >= 0; i--) { const s = satellites[i]; const altDiff = TARGET_ALT_Y - s.y; if (Math.abs(altDiff) < 200) s.vy += (altDiff * 0.005 - s.vy * 0.125) * dt; if (s.y > TARGET_ALT_Y + ALT_ENVELOPE) { s.vy += 12 * dt; s.heat += 0.5 * dt; } s.x += s.vx * dt; s.y += s.vy * dt; if (s.y > s.vaporizeAlt) { for (let j = 0; j < 10; j++) smokeTrail.push({ x: s.x, y: s.y, vx: (Math.random() - 0.5) * 15, vy: (Math.random() - 0.5) * 15, life: 0.5, size: 2, plasma: true }); satellites.splice(i, 1); continue; } if (s.x > width + 100) s.x = -100; else if (s.x < -100) s.x = width + 100; }
-            smokeTrail.forEach((p, i) => { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= (p.plasma ? 0.8 : (p.isOrange ? 1.0 : 0.2)) * dt; p.size += (p.plasma ? 3.0 : 5) * dt; if (p.life <= 0) smokeTrail.splice(i, 1); });
 
+            for (let i = satellites.length - 1; i >= 0; i--) {
+                const s = satellites[i], aD = TARGET_ALT_Y - s.y, inBand = Math.abs(aD) < ALT_ENVELOPE;
+                // 1. Logic: Boot up if in band, shut down if out
+                if (inBand) {
+                    if (!s.activated) { s.activationTimer += dt; s.flicker = Math.sin(s.activationTimer * 20) > 0; if (s.activationTimer > 2.5) { s.activated = true; s.flicker = false; } }
+                } else { s.activated = false; s.flicker = false; s.activationTimer = 0; }
+                // 2. Physics: Gravity and Orbit Snapping
+                if (Math.abs(aD) < 200) s.vy += (aD * 0.005 - s.vy * 0.125) * dt;
+                if (s.y > TARGET_ALT_Y + ALT_ENVELOPE) { s.vy += 12 * dt; s.heat += 0.5 * dt; }
+                // 3. MOVEMENT: Apply velocity to position (CRITICAL)
+                s.x += s.vx * dt; s.y += s.vy * dt;
+                // 4. Boundaries: Vaporize if too low, screen wrap horizontally
+                if (s.y > s.vaporizeAlt) {
+                    for (let j = 0; j < 10; j++) smokeTrail.push({ x: s.x, y: s.y, vx: (Math.random() - 0.5) * 15, vy: (Math.random() - 0.5) * 15, life: 0.5, size: 2, plasma: true });
+                    satellites.splice(i, 1); continue;
+                }
+                if (s.x > width + 100) s.x = -100; else if (s.x < -100) s.x = width + 100;
+            }
+
+            legacySats.forEach(s => {
+                s.x += s.vx * dt;
+                s.y += s.vy * dt;
+
+                // Wrap around logic so they stay in the sky forever
+                if (s.x > width + 100) {
+                    s.x = -100;
+                } else if (s.x < -100) {
+                    s.x = width + 100;
+                }
+            });
+
+            smokeTrail.forEach((p, i) => { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= (p.plasma ? 0.8 : (p.isOrange ? 1.0 : 0.2)) * dt; p.size += (p.plasma ? 3.0 : 5) * dt; if (p.life <= 0) smokeTrail.splice(i, 1); });
             updateUI(time); draw(); lastTime = performance.now(); animationId = requestAnimationFrame(update);
         }
 
+
+
+
         function checkColl(obj) {
-            if (obj.landed || obj.crashed) return;
-            if (obj.x >= launchPad.x1 && obj.x <= launchPad.x2 && obj.y + 25 >= launchPad.y) { obj.y = launchPad.y - 25; obj.yv = 0; obj.xv *= 0.8; return; }
+            if (obj.landed || obj.crashed) return; if (obj.x >= launchPad.x1 && obj.x <= launchPad.x2 && obj.y + 25 >= launchPad.y) { obj.y = launchPad.y - 25; obj.yv = 0; obj.xv *= 0.8; return; }
             for (let i = 0; i < terrain.length - 1; i++) {
-                let p1 = terrain[i], p2 = terrain[i + 1];
-                if (obj.x >= p1.x && obj.x <= p2.x) {
-                    let groundY = p1.y + (p2.y - p1.y) * ((obj.x - p1.x) / (p2.x - p1.x)); const landingThreshold = (obj.id === 'Booster' && separated) ? groundY - 15 : groundY;
-                    if (obj.y + 25 >= landingThreshold) {
-                        const pad = pads.find(p => obj.x >= p.x1 && obj.x <= p.x2 && (p.owner === obj.id || !separated));
-                        const vLimit = separated ? 35 : 15; if (pad && obj.yv < vLimit && Math.abs(obj.xv) < 20 && Math.abs(obj.angle + Math.PI / 2) < 0.25) { obj.landed = true; obj.xv = 0; obj.yv = 0; obj.thrusting = false; triggerLandingPuff(obj.x, obj.y + 25); }
-                        else obj.crashed = true;
-                    }
+                let p1 = terrain[i], p2 = terrain[i + 1]; if (obj.x >= p1.x && obj.x <= p2.x) {
+                    let gY = p1.y + (p2.y - p1.y) * ((obj.x - p1.x) / (p2.x - p1.x)); const lT = (obj.id === 'Booster' && separated) ? gY - 15 : gY;
+                    if (obj.y + 25 >= lT) { const pad = pads.find(p => obj.x >= p.x1 && obj.x <= p.x2 && (p.owner === obj.id || !separated)), vL = separated ? 35 : 15; if (pad && obj.yv < vL && Math.abs(obj.xv) < 20 && Math.abs(obj.angle + Math.PI / 2) < 0.25) { obj.landed = true; obj.xv = 0; obj.yv = 0; obj.thrusting = false; triggerLandingPuff(obj.x, obj.y + 25); } else obj.crashed = true; }
                 }
             }
         }
+
 
         function checkEagleColl(obj) {
             if (obj.landed || obj.crashed) return;
+
+            // Define a size threshold below which eagles are considered "too far" to collide
+            const COLLISION_SIZE_THRESHOLD = 0.3;
+
             backgroundObjects.forEach(bk => {
                 if (bk.type === "Eagle" && !bk.crashed) {
-                    const wS = EAGLE_WIDTH / 180, hS = EAGLE_HEIGHT / 64, eSize = bk.size;
-                    const eLeft = bk.x - (100 * wS * eSize), eRight = bk.x + (80 * wS * eSize), eTop = bk.y - (25 * hS * eSize) - 10, eBottom = bk.y + (39 * hS * eSize) + 10;
-                    const oLeft = obj.x - obj.width / 2, oRight = obj.x + obj.width / 2, oTop = obj.y - obj.height / 2, oBottom = obj.y + obj.height / 2;
-                    if (oLeft < eRight && oRight > eLeft && oTop < eBottom && oBottom > eTop) { bk.crashed = true; obj.crashed = true; booster.autopilot = true; separated = true; for (let i = 0; i < 10; i++) smokeTrail.push({ x: bk.x, y: bk.y, vx: bk.speed * bk.direction * (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * -160, life: 1, size: .25, plasma: true }); if (audioCtx) playSound('sep'); }
-                }
-            });
-        }
 
-        function updateUI(time) {
-            const elapsed = Math.floor((time - missionStart) / 1000);
-            uiState.timer = splashActive ? "T- 00:00" : `T+ ${Math.floor(elapsed / 60).toString().padStart(2, '0')}:${(elapsed % 60).toString().padStart(2, '0')}`;
-            const inZone = Math.abs(ship.y - TARGET_ALT_Y) < ALT_ENVELOPE && Math.abs(ship.xv - ORBITAL_VELOCITY) < VELOCITY_TOLERANCE;
-            uiState.payloadText = inZone ? "IN ZONE" : "OUTSIDE"; uiState.payloadInZone = inZone;
-            const count = satellites.filter(s => Math.abs(s.y - TARGET_ALT_Y) < ALT_ENVELOPE).length;
-            uiState.satCount = count; uiState.mbps = count * 0.95;
-            let ms = "OFFLINE: NO CONSTELLATION";
-            if (count > 0 && count < 10) ms = "BBS REACHED: 14.4K DIAL-UP";
-            else if (count < 30) ms = "AOL 2.5 ACHIEVED: WELCOME!";
-            else if (count < 60) ms = "NETSCAPE NAVIGATOR: THE WEB IS BORN";
-            else if (count < 100) ms = "NAPSTER PEER-2-PEER: SHARING FILE";
-            else if (count < 150) ms = "GEOCITIES LIVE: MY HOME PAGE";
-            else if (count < 200) ms = "HAMSTER DANCE 4K: DANCE NOW";
-            else if (count >= 200) ms = "MODERN WEB: UNSTABLE (LAGGY)";
-            uiState.milestone = ms;
-            pulseAngle += 0.1;
-        }
+                    // NEW: Skip collision logic if the eagle is smaller than our threshold
+                    if (bk.size < COLLISION_SIZE_THRESHOLD) return;
 
-        // function drawCosmeticEagle(ctx, obj, alpha) {
-        //     if (obj.crashed) return;
-        //     ctx.save(); ctx.translate(obj.x, obj.y); ctx.scale(obj.size * (obj.direction * -1), obj.size);
-        //     const wS = EAGLE_WIDTH / 180, hS = EAGLE_HEIGHT / 64;
-        //     ctx.fillStyle = `rgba(130,130,130, ${alpha})`; ctx.strokeStyle = `rgba(0,0,0, ${alpha})`; ctx.lineWidth = 2;
-        //     ctx.beginPath(); ctx.moveTo(-100 * wS, 0); ctx.lineTo(-80 * wS, -20 * hS); ctx.lineTo(-70 * wS, -20 * hS); ctx.lineTo(-60 * wS, -10 * hS); ctx.lineTo(-60 * wS, 10 * hS); ctx.lineTo(-70 * wS, 20 * hS); ctx.lineTo(-80 * wS, 20 * hS); ctx.closePath(); ctx.fill(); ctx.stroke();
-        //     ctx.fillStyle = `rgba(140,140,140, ${alpha})`; ctx.fillRect(-60 * wS, -20 * hS, 120 * wS, 40 * hS); ctx.strokeRect(-60 * wS, -20 * hS, 120 * wS, 40 * hS);
-        //     ctx.fillStyle = `rgba(50,50,60, ${alpha})`; for (let i = 0; i < 5; i++) { ctx.fillRect((-48 + (i * 22)) * wS, -5 * hS, 10 * wS, 10 * hS); }
-        //     ctx.strokeStyle = `rgba(80,80,80, ${alpha})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-60 * wS, -25 * hS); ctx.lineTo(60 * wS, -25 * hS); ctx.stroke();
-        //     for (let i = -50; i <= 50; i += 25) { ctx.beginPath(); ctx.moveTo(i * wS, -25 * hS); ctx.lineTo(i * wS, -20 * hS); ctx.stroke(); }
-        //     ctx.fillStyle = `rgba(130, 80, 40, ${alpha})`; ctx.beginPath(); ctx.moveTo(60 * wS, -10 * hS); ctx.lineTo(80 * wS, -15 * hS); ctx.lineTo(80 * wS, 15 * hS); ctx.lineTo(60 * wS, 10 * hS); ctx.closePath(); ctx.fill(); ctx.stroke();
-        //     ctx.strokeStyle = `rgba(110,110,110, ${alpha})`; ctx.lineWidth = 1.5;
-        //     [-52, -38, 38, 52].forEach(offset => { const oX = offset * wS, side = offset < 0 ? -1 : 1; ctx.beginPath(); ctx.moveTo(oX, 20 * hS); ctx.lineTo(oX + (side * 6 * wS), 36 * hS); ctx.stroke(); ctx.fillStyle = `rgba(80,80,80, ${alpha})`; ctx.fillRect(oX + (side < 0 ? -12 * wS : 0), 36 * hS, 12 * wS, 3 * hS); });
-        //     ctx.restore();
-        // }
+                    const wS = EAGLE_WIDTH / 180,
+                        hS = EAGLE_HEIGHT / 64,
+                        eS = bk.size,
+                        eL = bk.x - (100 * wS * eS),
+                        eR = bk.x + (80 * wS * eS),
+                        eT = bk.y - (25 * hS * eS) - 10,
+                        eB = bk.y + (39 * hS * eS) + 10,
+                        oL = obj.x - obj.width / 2,
+                        oR = obj.x + obj.width / 2,
+                        oT = obj.y - obj.height / 2,
+                        oB = obj.y + obj.height / 2;
 
-
-        function drawCosmeticEagle(ctx, obj, alpha) {
-            if (obj.crashed) return;
-
-            // Check if at least one radar station exists in the background
-            const hasRadar = backgroundObjects.some(o => o.type === 'Radar');
-
-            ctx.save();
-            ctx.translate(obj.x, obj.y);
-            ctx.scale(obj.size * (obj.direction * -1), obj.size);
-
-            const wS = EAGLE_WIDTH / 180, hS = EAGLE_HEIGHT / 64;
-            ctx.fillStyle = `rgba(130,130,130, ${alpha})`; ctx.strokeStyle = `rgba(0,0,0, ${alpha})`; ctx.lineWidth = 2;
-
-            // Command Module
-            ctx.beginPath(); ctx.moveTo(-100 * wS, 0); ctx.lineTo(-80 * wS, -20 * hS); ctx.lineTo(-70 * wS, -20 * hS);
-            ctx.lineTo(-60 * wS, -10 * hS); ctx.lineTo(-60 * wS, 10 * hS); ctx.lineTo(-70 * wS, 20 * hS);
-            ctx.lineTo(-80 * wS, 20 * hS); ctx.closePath(); ctx.fill(); ctx.stroke();
-
-            // Passenger Module & Windows
-            ctx.fillStyle = `rgba(140,140,140, ${alpha})`; ctx.fillRect(-60 * wS, -20 * hS, 120 * wS, 40 * hS); ctx.strokeRect(-60 * wS, -20 * hS, 120 * wS, 40 * hS);
-            ctx.fillStyle = `rgba(50,50,60, ${alpha})`;
-            for (let i = 0; i < 5; i++) { ctx.fillRect((-48 + (i * 22)) * wS, -5 * hS, 10 * wS, 10 * hS); }
-
-            // Top Spine structure
-            ctx.strokeStyle = `rgba(80,80,80, ${alpha})`; ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.moveTo(-60 * wS, -25 * hS); ctx.lineTo(60 * wS, -25 * hS); ctx.stroke();
-            for (let i = -50; i <= 50; i += 25) { ctx.beginPath(); ctx.moveTo(i * wS, -25 * hS); ctx.lineTo(i * wS, -20 * hS); ctx.stroke(); }
-
-            // --- NEW: RADAR-LINKED SIGNAL LIGHT ---
-            if (hasRadar) {
-                const blink = Math.sin(cosmeticObjPulse * 3) > 0;
-                ctx.fillStyle = blink ? `rgba(255, 0, 0, ${alpha})` : `rgba(50, 0, 0, ${alpha})`;
-                ctx.beginPath();
-                // y changed from -28 to 22 (bottom), radius changed from 3 to 6 (larger)
-                ctx.arc(0, 22 * hS, 6 * wS, 0, Math.PI * 2);
-                ctx.fill();
-                // Front Facing Radar Dish
-                ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
-                ctx.lineWidth = 2;
-                // Stem protruding from nose
-                ctx.beginPath();
-                ctx.moveTo(-100 * wS, -2 * hS);
-                ctx.lineTo(-110 * wS, -2 * hS);
-                ctx.stroke();
-                // Mini dish bowl
-                ctx.beginPath();
-                ctx.arc(-133 * wS, -2 * hS, 17 * hS, 1.5 * Math.PI, 0.5 * Math.PI);
-                ctx.stroke();
-
-
-
-
-            }
-
-            // Engine Section
-            ctx.fillStyle = `rgba(130, 80, 40, ${alpha})`; ctx.beginPath();
-            ctx.moveTo(60 * wS, -10 * hS); ctx.lineTo(80 * wS, -15 * hS); ctx.lineTo(80 * wS, 15 * hS);
-            ctx.lineTo(60 * wS, 10 * hS); ctx.closePath(); ctx.fill(); ctx.stroke();
-
-            // Landing Gear
-            ctx.strokeStyle = `rgba(110,110,110, ${alpha})`; ctx.lineWidth = 1.5;
-            [-52, -38, 38, 52].forEach(offset => {
-                const oX = offset * wS, side = offset < 0 ? -1 : 1;
-                ctx.beginPath(); ctx.moveTo(oX, 20 * hS); ctx.lineTo(oX + (side * 6 * wS), 36 * hS); ctx.stroke();
-                ctx.fillStyle = `rgba(80,80,80, ${alpha})`; ctx.fillRect(oX + (side < 0 ? -12 * wS : 0), 36 * hS, 12 * wS, 3 * hS);
-            });
-
-            ctx.restore();
-        }
-
-        function drawCosmeticBuggy(ctx, obj, alpha) {
-            ctx.save(); ctx.translate(obj.x, obj.y); ctx.rotate(obj.angle); ctx.scale(obj.size, obj.size);
-            ctx.fillStyle = `rgba(220,220,220, ${alpha})`; ctx.strokeStyle = `rgba(50,50,50, ${alpha})`; ctx.lineWidth = 1;
-            ctx.fillRect(-12, -8, 24, 8); ctx.beginPath(); ctx.moveTo(5, -8); ctx.lineTo(8, -15); ctx.stroke();
-            ctx.fillStyle = `rgba(20,20,20, ${alpha})`; ctx.beginPath(); ctx.arc(-8, 2, 4, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(8, 2, 4, 0, Math.PI * 2); ctx.fill();
-            ctx.restore();
-        }
-
-        function drawCosmeticRadarStation(ctx, obj, alpha) {
-            ctx.save();
-            ctx.translate(obj.x, obj.y);
-            //ctx.rotate(obj.angle); // Aligns with terrain slope
-            ctx.scale(obj.size, obj.size);
-
-            // 1. MAIN BUILDING (The Base)
-            ctx.fillStyle = `rgba(100, 100, 100, ${alpha})`;
-            ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
-            ctx.lineWidth = 1;
-            // Main hub
-            ctx.fillRect(-25, -20, 50, 20);
-            ctx.strokeRect(-25, -20, 50, 20);
-            // Paneling detail
-            ctx.fillStyle = `rgba(120, 120, 120, ${alpha})`;
-            ctx.fillRect(-15, -15, 10, 10);
-            ctx.fillRect(5, -15, 10, 10);
-
-            // 2. THE RADAR DISH
-            ctx.save();
-            ctx.translate(-12, -20);
-            // Gentle back-and-forth scanning motion
-            const scanTilt = Math.sin(cosmeticObjPulse * 0.5) * 0.5;
-            ctx.rotate(scanTilt - 0.4);
-
-            // Dish Support
-            ctx.strokeStyle = `rgba(80, 80, 80, ${alpha})`;
-            ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -8); ctx.stroke();
-
-            // The Dish Bowl
-            ctx.fillStyle = `rgba(180, 180, 180, ${alpha})`;
-            ctx.beginPath();
-            ctx.arc(0, -12, 15, 0, Math.PI, true);
-            ctx.fill();
-            ctx.stroke();
-
-            // Receiver Needle
-            ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(0, -22); ctx.stroke();
-            ctx.restore();
-
-            // 3. SIGNAL MAST (The Tall Antenna)
-            ctx.translate(15, -20);
-            ctx.strokeStyle = `rgba(70, 70, 70, ${alpha})`;
-            ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -35); ctx.stroke();
-
-            // Cross-bars
-            ctx.beginPath();
-            ctx.moveTo(-5, -25); ctx.lineTo(5, -25);
-            ctx.moveTo(-3, -30); ctx.lineTo(3, -30);
-            ctx.stroke();
-
-            // Blinking Red Light at the tip
-            const blink = Math.sin(cosmeticObjPulse * 3) > 0;
-            ctx.fillStyle = blink ? `rgba(255, 0, 0, ${alpha})` : `rgba(50, 0, 0, ${alpha})`;
-            ctx.beginPath();
-            ctx.arc(0, -37, 2, 0, Math.PI * 2);
-            ctx.fill();
-
-            ctx.restore();
-        }
-
-        function drawRocket(ctx, obj, type) {
-            if (obj.exploded) return;
-            ctx.save(); ctx.translate(obj.x, obj.y); ctx.rotate(obj.angle + Math.PI / 2);
-            ctx.fillStyle = obj.color; ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1;
-            if (type === 'ship') {
-                ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(7.2, -10); ctx.lineTo(8.1, 20); ctx.lineTo(-8.1, 20); ctx.lineTo(-7.2, -10); ctx.closePath(); ctx.fill(); ctx.stroke();
-                ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.moveTo(-7.7, -10); ctx.lineTo(7.7, -10); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-8.1, 10); ctx.lineTo(8.1, 10); ctx.stroke(); ctx.beginPath(); ctx.moveTo(3.6, -10); ctx.lineTo(3.6, 20); ctx.stroke();
-                ctx.fillStyle = (doorOpen && satInventory > 0) ? '#004d4d' : '#007a7a'; ctx.fillRect(-4.5, 5, 9, 4); ctx.strokeRect(-4.5, 5, 9, 4);
-            } else {
-                ctx.fillRect(-8.1, -24, 16.2, 48); ctx.strokeRect(-8.1, -24, 16.2, 48);
-                ctx.strokeStyle = '#000000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-3, -18); ctx.lineTo(3, -18); ctx.stroke();
-                ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-8.1, -12); ctx.lineTo(8.1, -12); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-8.1, 6); ctx.lineTo(8.1, 6); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-3.6, -24); ctx.lineTo(-3.6, 24); ctx.stroke();
-            }
-            if (type === 'ship' || obj.legsVisible) {
-                ctx.strokeStyle = obj.color; ctx.beginPath(); const yBase = (type === 'booster') ? 18 : 15;
-                ctx.moveTo(-8.1, yBase); ctx.lineTo(-14.4, yBase + 10); ctx.lineTo(-18.9, yBase + 10);
-                ctx.moveTo(8.1, yBase); ctx.lineTo(14.4, yBase + 10); ctx.lineTo(18.9, yBase + 10); ctx.stroke();
-            }
-            const active = !separated ? (obj === booster && ship.thrusting) : obj.thrusting;
-            const currentFuel = (!separated && obj === booster) ? booster.fuel : obj.fuel;
-            if (active && (currentFuel > 0 || !separated) && !obj.landed) {
-                const grad = ctx.createLinearGradient(0, 20, 0, 60); grad.addColorStop(0, '#ffcc00'); grad.addColorStop(0.5, '#ff6600'); grad.addColorStop(1, 'transparent');
-                ctx.fillStyle = grad; ctx.beginPath(); const yStart = (type === 'booster') ? 24 : 20;
-                ctx.moveTo(-5.4, yStart); ctx.quadraticCurveTo(0, yStart + 40, 5.4, yStart); ctx.fill();
-            }
-            ctx.restore();
-        }
-
-        function draw() {
-            vCtx.fillStyle = '#000'; vCtx.fillRect(0, 0, virtualWidth, virtualHeight);
-            stars.forEach(s => { vCtx.fillStyle = `rgba(255,255,255,${s.opacity})`; vCtx.fillRect(s.x, s.y, s.size, s.size); });
-            vCtx.save(); vCtx.setLineDash([10, 10]); vCtx.lineWidth = 1; vCtx.strokeStyle = 'rgba(100, 100, 100, 1)'; vCtx.beginPath(); vCtx.moveTo(0, TARGET_ALT_Y - ALT_ENVELOPE);
-            vCtx.lineTo(width, TARGET_ALT_Y - ALT_ENVELOPE); vCtx.moveTo(0, TARGET_ALT_Y + ALT_ENVELOPE); vCtx.lineTo(width, TARGET_ALT_Y + ALT_ENVELOPE); vCtx.stroke(); vCtx.restore();
-
-            // Draw Saturn
-            if (planetImg.complete) {
-                vCtx.save();
-                vCtx.globalAlpha = 0.5; 
-                vCtx.drawImage(planetImg, 1200, 100, 110, 58);
-                vCtx.restore();
-            }
-
-            backgroundObjects.forEach(obj => {
-                if (obj.crashed) return;
-                if (obj.type === 'Eagle') drawCosmeticEagle(vCtx, obj, obj.alpha);
-                if (obj.type === 'Radar') drawCosmeticRadarStation(vCtx, obj, obj.alpha);
-                if (obj.type === 'Buggy') drawCosmeticBuggy(vCtx, obj, obj.alpha);
-            });
-
-            // --- RESTORED INSTRUCTIONS OVERLAY ---
-            const now = performance.now();
-            if (instructionsStartTime && (now - instructionsStartTime) < 5000) { vCtx.save(); vCtx.letterSpacing = "4px"; vCtx.font = '30px "Lucida Console", Monaco, monospace'; vCtx.fillStyle = 'rgba(0, 255, 255, 0.7)'; vCtx.textAlign = 'center'; vCtx.textBaseline = 'middle'; vCtx.fillText('Deploy Satellites Into Orbit', width / 2, TARGET_ALT_Y); vCtx.restore(); }
-
-            smokeTrail.forEach(p => { let color; if (p.plasma) color = `rgba(255, ${Math.random() * 150 + 100}, 0, ${p.life * 0.8})`; else if (p.isOrange) color = `rgba(255, 140, 0, ${p.life * 0.6})`; else color = `rgba(140,140,140,${p.life * 0.3})`; vCtx.fillStyle = color; vCtx.beginPath(); vCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2); vCtx.fill(); });
-            vCtx.strokeStyle = '#555'; vCtx.lineWidth = 9; vCtx.beginPath(); vCtx.moveTo(launchPad.x1, launchPad.y); vCtx.lineTo(launchPad.x2, launchPad.y); vCtx.stroke();
-            //            pads.forEach(p => { vCtx.strokeStyle = p.owner === 'Ship' ? '#00ffff' : '#ffffff'; vCtx.lineWidth = 6; vCtx.beginPath(); vCtx.moveTo(p.x1 - 5, p.y - 1); vCtx.lineTo(p.x2 + 5, p.y - 1); vCtx.stroke(); if (p.owner === 'Booster') { let cX = (p.x1 + p.x2) / 2; vCtx.strokeStyle = '#303030'; vCtx.lineWidth = 2; vCtx.beginPath(); vCtx.moveTo(cX + 15, p.y); vCtx.lineTo(cX + 15, p.y - 80); vCtx.moveTo(cX + 20, p.y); vCtx.lineTo(cX + 20, p.y - 80); vCtx.stroke(); vCtx.strokeStyle = '#404040'; vCtx.lineWidth = 3; vCtx.beginPath(); vCtx.moveTo(cX + 15, p.y - 59); vCtx.lineTo(cX - 9, p.y - 59); vCtx.stroke(); } });
-            craters.forEach(c => { vCtx.strokeStyle = `rgba(120, 120, 120, ${c.alpha})`; vCtx.lineWidth = 2; vCtx.beginPath(); vCtx.ellipse(c.x, c.y, c.radiusX, c.radiusY, 0, 0, Math.PI * 2); vCtx.stroke(); });
-            vCtx.strokeStyle = '#444'; vCtx.lineWidth = 1.5; vCtx.beginPath(); vCtx.moveTo(terrain[0].x, terrain[0].y); terrain.forEach(p => vCtx.lineTo(p.x, p.y)); vCtx.stroke();
-            drawRocket(vCtx, ship, 'ship'); drawRocket(vCtx, booster, 'booster');
-            legacySats.forEach(s => { vCtx.fillStyle = `rgba(180, 240, 255, ${s.opacity})`; vCtx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size); });
-            satellites.forEach(s => { const heatRatio = Math.min(s.heat / 5, 1); const r = Math.floor(200 + (55 * heatRatio)), g = Math.floor(255 * (1 - heatRatio)), b = Math.floor(255 * (1 - heatRatio)); const streakLen = 0.1 + (heatRatio * 0.8); vCtx.save(); const grad = vCtx.createLinearGradient(s.x, s.y, s.x - s.vx * streakLen, s.y - s.vy * streakLen); grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${s.opacity})`); grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`); vCtx.strokeStyle = grad; vCtx.lineWidth = 1 + (heatRatio * 1); vCtx.beginPath(); vCtx.moveTo(s.x, s.y); vCtx.lineTo(s.x - s.vx * streakLen, s.y - s.vy * streakLen); vCtx.stroke(); vCtx.restore(); vCtx.fillStyle = `rgba(${r}, ${g}, ${b}, ${s.opacity})`; vCtx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size); });
-            pads.forEach(p => { vCtx.strokeStyle = p.owner === 'Ship' ? '#00ffff' : '#ffffff'; vCtx.lineWidth = 6; vCtx.beginPath(); vCtx.moveTo(p.x1 - 5, p.y - 1); vCtx.lineTo(p.x2 + 5, p.y - 1); vCtx.stroke(); if (p.owner === 'Booster') { let cX = (p.x1 + p.x2) / 2; vCtx.strokeStyle = '#303030'; vCtx.lineWidth = 2; vCtx.beginPath(); vCtx.moveTo(cX + 15, p.y); vCtx.lineTo(cX + 15, p.y - 80); vCtx.moveTo(cX + 20, p.y); vCtx.lineTo(cX + 20, p.y - 80); vCtx.stroke(); vCtx.strokeStyle = '#404040'; vCtx.lineWidth = 3; vCtx.beginPath(); vCtx.moveTo(cX + 15, p.y - 59); vCtx.lineTo(cX - 9, p.y - 59); vCtx.stroke(); } });
-
-
-
-
-
-            drawHUD(); // New Bitmap HUD draw call
-
-            //ctx.clearRect(0, 0, canvas.width, canvas.height);
-            //ctx.drawImage(offScreenCanvas, 0, 0, virtualWidth, virtualHeight, 0, 0, canvas.width, canvas.height);
-
-
-            // --- ASPECT RATIO CORRECTION ---
-            const screenRatio = canvas.width / canvas.height;
-            const virtualRatio = virtualWidth / virtualHeight;
-            let drawW, drawH, dx, dy;
-
-            if (screenRatio > virtualRatio) {
-                // Window is wider than the game (Pillarbox)
-                drawH = canvas.height;
-                drawW = drawH * virtualRatio;
-                dx = (canvas.width - drawW) / 2;
-                dy = 0;
-            } else {
-                // Window is taller than the game (Letterbox)
-                drawW = canvas.width;
-                drawH = drawW / virtualRatio;
-                dx = 0;
-                dy = (canvas.height - drawH) / 2;
-            }
-
-            ctx.fillStyle = '#000'; // Fill background for bars
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(offScreenCanvas, 0, 0, virtualWidth, virtualHeight, dx, dy, drawW, drawH);
-
-        }
-
-
-        function handleEagleEvasion() {
-            const scanDistX = 200; // How far in front they look
-            const scanDistY = 300; // How far above they look
-
-            backgroundObjects.forEach(eagle => {
-                // Only flying, non-crashed Eagles use radar
-                if (eagle.type !== 'Eagle' || eagle.crashed) return;
-
-                const targets = [ship, booster];
-                let threatFound = false;
-
-                for (let target of targets) {
-                    if (target.exploded) continue;
-
-                    // Calculate horizontal distance relative to Eagle's direction
-                    // (A positive result means the target is in front of the Eagle)
-                    const dx = (target.x - eagle.x) * eagle.direction;
-
-                    // Calculate vertical distance (positive means target is higher than Eagle)
-                    const dy = eagle.y - target.y;
-
-                    // If target is in the "Front-Above" quadrant
-                    if (dx > 0 && dx < scanDistX && dy > 0 && dy < scanDistY) {
-                        threatFound = true;
-                        break;
+                    if (oL < eR && oR > eL && oT < eB && oB > eT) {
+                        bk.crashed = true;
+                        obj.crashed = true;
+                        booster.autopilot = true;
+                        separated = true;
+                        // ... rest of your existing logic
                     }
                 }
-
-                if (threatFound) {
-                    eagle.direction *= -1; // Reverse direction
-                    eagle.x += eagle.direction * 5; // Small nudge to prevent frame-flip jitter
-                }
             });
         }
 
 
-
-        window.addEventListener('keydown', e => {
-            if (!audioCtx) initAudio();
-            if (splashActive && e.code === 'Space') { splashActive = false; splashDiv.style.display = 'none'; missionStart = performance.now(); instructionsStartTime = performance.now(); return; }
-            if (splashActive) return;
-            keys[e.code] = true;
-            if (e.code === 'KeyR') { init(false, true); return; }
-            if (e.code === 'KeyS' && !separated) { const midX = (ship.x + booster.x) / 2, midY = (ship.y + booster.y) / 2; triggerSeparationSmoke(midX, midY); playSound('sep'); separated = true; booster.autopilot = true; booster.yv += 22; ship.yv -= 10; }
-            if (e.code === 'KeyD') deploySatellites();
-            if (e.code === 'KeyA') { ship.autopilot = !ship.autopilot; }
-            if (e.code === 'Space' && gameOver) init(false, true);
-        });
-
-        window.addEventListener('keyup', e => keys[e.code] = false);
-        window.addEventListener('mousedown', () => { if (!audioCtx) initAudio(); });
-        //window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
-
-
-        window.addEventListener('resize', () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        });
-
-        function playIntroSong() {
-            if (!audioCtx) initAudio();
-            const now = audioCtx.currentTime;
-            [[523.25, 0.0, 0.15], [659.25, 0.2, 0.15], [783.99, 0.4, 0.15], [1046.5, 0.6, 0.3], [783.99, 0.9, 0.1], [1046.5, 1.0, 0.5]].forEach(([f, d, du]) => { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(f, now + d); g.gain.setValueAtTime(0.06, now + d); g.gain.exponentialRampToValueAtTime(0.001, now + d + du); o.connect(g); g.connect(audioCtx.destination); o.start(now + d); o.stop(now + d + du); });
+        function updateUI(time) {
+            const elapsed = Math.floor((time - missionStart) / 1000); uiState.timer = splashActive ? "T- 00:00" : `T+ ${Math.floor(elapsed / 60).toString().padStart(2, '0')}:${(elapsed % 60).toString().padStart(2, '0')}`;
+            const iZ = Math.abs(ship.y - TARGET_ALT_Y) < ALT_ENVELOPE && Math.abs(ship.xv - ORBITAL_VELOCITY) < VELOCITY_TOLERANCE; uiState.payloadText = iZ ? "IN ZONE" : "OUTSIDE"; uiState.payloadInZone = iZ;
+            const cnt = satellites.filter(s => Math.abs(s.y - TARGET_ALT_Y) < ALT_ENVELOPE).length; uiState.satCount = cnt; uiState.mbps = cnt * 0.95;
+            let ms = "OFFLINE: NO CONSTELLATION"; if (cnt > 0 && cnt < 10) ms = "BBS REACHED: 14.4K DIAL-UP"; else if (cnt < 30) ms = "AOL 2.5 ACHIEVED: WELCOME!"; else if (cnt < 60) ms = "NETSCAPE NAVIGATOR: THE WEB IS BORN"; else if (cnt < 100) ms = "NAPSTER PEER-2-PEER: SHARING FILE"; else if (cnt < 150) ms = "GEOCITIES LIVE: MY HOME PAGE"; else if (cnt < 200) ms = "HAMSTER DANCE 4K: DANCE NOW"; else if (cnt >= 200) ms = "MODERN WEB: UNSTABLE (LAGGY)"; uiState.milestone = ms; pulseAngle += 0.1; uiState.gameLevel = cnt / 50;
         }
+
+        function drawCosmeticEagle(ctx, obj, alpha) {
+            if (obj.crashed) return; ctx.save(); ctx.translate(obj.x, obj.y); ctx.scale(obj.size * (obj.direction * -1), obj.size); const wS = 100 / 180, hS = 50 / 64; ctx.fillStyle = `rgba(130,130,130, ${alpha})`; ctx.strokeStyle = `rgba(0,0,0, ${alpha})`; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(-100 * wS, 0); ctx.lineTo(-80 * wS, -20 * hS); ctx.lineTo(-70 * wS, -20 * hS); ctx.lineTo(-60 * wS, -10 * hS); ctx.lineTo(-60 * wS, 10 * hS); ctx.lineTo(-70 * wS, 20 * hS); ctx.lineTo(-80 * wS, 20 * hS); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = `rgba(140,140,140, ${alpha})`; ctx.fillRect(-60 * wS, -20 * hS, 120 * wS, 40 * hS); ctx.strokeRect(-60 * wS, -20 * hS, 120 * wS, 40 * hS);
+            ctx.fillStyle = `rgba(50,50,60, ${alpha})`; for (let i = 0; i < 5; i++) { ctx.fillRect((-48 + (i * 22)) * wS, -5 * hS, 10 * wS, 10 * hS); }
+            ctx.strokeStyle = `rgba(80,80,80, ${alpha})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-60 * wS, -25 * hS); ctx.lineTo(60 * wS, -25 * hS); ctx.stroke();
+            // Radar Option
+            if (backgroundObjects.some(o => o.type === 'Radar')) { const b = Math.sin(cosmeticObjPulse * 3) > 0; ctx.fillStyle = b ? `rgba(255, 0, 0, ${alpha})` : `rgba(50, 0, 0, ${alpha})`; ctx.beginPath(); ctx.arc(0, 22 * hS, 6 * wS, 0, Math.PI * 2); ctx.fill(); }
+
+            ctx.fillStyle = `rgba(130, 80, 40, ${alpha})`; ctx.beginPath(); ctx.moveTo(60 * wS, -10 * hS); ctx.lineTo(80 * wS, -15 * hS); ctx.lineTo(80 * wS, 15 * hS); ctx.lineTo(60 * wS, 10 * hS); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.strokeStyle = `rgba(110,110,110, ${alpha})`; ctx.lineWidth = 1.5;[-52, -38, 38, 52].forEach(o => { const s = o < 0 ? -1 : 1; ctx.beginPath(); ctx.moveTo(o * wS, 20 * hS); ctx.lineTo((o + s * 6) * wS, 36 * hS); ctx.stroke(); ctx.fillStyle = `rgba(80,80,80, ${alpha})`; ctx.fillRect((o + (s < 0 ? -12 : 0)) * wS, 36 * hS, 12 * wS, 3 * hS); }); ctx.restore();
+        }
+
+        function drawCosmeticBuggy(ctx, obj, alpha) { ctx.save(); ctx.translate(obj.x, obj.y); ctx.rotate(obj.angle); ctx.scale(obj.size, obj.size); ctx.fillStyle = `rgba(220,220,220, ${alpha})`; ctx.strokeStyle = `rgba(50,50,50, ${alpha})`; ctx.lineWidth = 1; ctx.fillRect(-12, -8, 24, 8); ctx.beginPath(); ctx.moveTo(5, -8); ctx.lineTo(8, -15); ctx.stroke(); ctx.fillStyle = `rgba(20,20,20, ${alpha})`; ctx.beginPath(); ctx.arc(-8, 2, 4, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(8, 2, 4, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+
+        function drawCosmeticRadarStation(ctx, obj, alpha) {
+            ctx.save(); ctx.translate(obj.x, obj.y); ctx.scale(obj.size, obj.size); ctx.fillStyle = `rgba(100, 100, 100, ${alpha})`; ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`; ctx.lineWidth = 1; ctx.fillRect(-25, -20, 50, 20); ctx.strokeRect(-25, -20, 50, 20);
+            ctx.save(); ctx.translate(-12, -20); ctx.rotate(Math.sin(cosmeticObjPulse * 0.5) * 0.5 - 0.4); ctx.strokeStyle = `rgba(80, 80, 80, ${alpha})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -8); ctx.stroke(); ctx.fillStyle = `rgba(180, 180, 180, ${alpha})`; ctx.beginPath(); ctx.arc(0, -12, 15, 0, Math.PI, true); ctx.fill(); ctx.stroke(); ctx.restore();
+            ctx.translate(15, -20); ctx.strokeStyle = `rgba(70, 70, 70, ${alpha})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -35); ctx.stroke();
+            const b = Math.sin(cosmeticObjPulse * 3) > 0; ctx.fillStyle = b ? `rgba(255, 0, 0, ${alpha})` : `rgba(50, 0, 0, ${alpha})`; ctx.beginPath(); ctx.arc(0, -37, 2, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        }
+
+        function drawCloud(ctx, obj, alpha) {
+            ctx.save();
+            ctx.translate(obj.x, obj.y);
+            ctx.scale(obj.size, obj.size);
+
+            // Calculate cloud darkness based on atmospheric progress
+            // As progress increases, clouds can shift from bright white to a "thicker" grey
+            const progress = Math.min(uiState.satCount / 300, 1);
+            const brightness = 255 - (progress * 100); // Fades from 255 (white) to 155 (grey)
+
+            ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${alpha * 0.8})`;
+            ctx.beginPath();
+
+            // Create a puffy shape using 5 overlapping circles
+            // Center mass
+            ctx.arc(0, 0, 30, 0, Math.PI * 2);
+            // Left bumps
+            ctx.arc(-25, 5, 20, 0, Math.PI * 2);
+            ctx.arc(-45, 10, 15, 0, Math.PI * 2);
+            // Right bumps
+            ctx.arc(25, 5, 20, 0, Math.PI * 2);
+            ctx.arc(45, 10, 15, 0, Math.PI * 2);
+
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawFarmingPlot(ctx, obj, alpha) {
+            ctx.save();
+            ctx.translate(obj.x, obj.y);
+            ctx.rotate(obj.angle);
+            ctx.scale(obj.size, obj.size);
+
+            // 1. The Soil Plot
+            ctx.fillStyle = `rgba(60, 40, 30, ${alpha})`; // Dark soil
+            ctx.fillRect(-60, 0, 120, 8);
+
+            // 2. The Crops (Growth based on mission progress)
+            const growth = Math.min(uiState.satCount / 150, 1.2);
+            const cropColor = uiState.satCount > 100 ? '#44ff44' : '#88aa44';
+
+            ctx.fillStyle = cropColor;
+            for (let i = -50; i <= 50; i += 12) {
+                const stalkHeight = 5 + (growth * 15);
+                // Draw little stalks
+                ctx.fillRect(i, -stalkHeight, 3, stalkHeight);
+                // Draw "leaves" or "fruit" if grown
+                if (growth > 0.5) {
+                    ctx.beginPath();
+                    ctx.arc(i + 1.5, -stalkHeight, 4 * growth, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            ctx.restore();
+        }
+
+        function drawTerraForm(ctx, obj, alpha) {
+            ctx.save();
+            ctx.translate(obj.x, obj.y);
+            ctx.scale(obj.size, obj.size);
+
+            // 0. SUBTERRANEAN ICE DEPOSIT
+            // Creates a rough, natural-looking layered ice vein beneath the station
+
+            // 0. SUBTERRANEAN ICE DEPOSIT
+            // Creates a rough, natural-looking layered ice vein beneath the station
+
+            // Outer deep frost layer (Lowered and rounded)
+            ctx.fillStyle = `rgba(140, 200, 240, ${alpha * 0.05})`;
+            ctx.beginPath();
+            ctx.moveTo(-70, 80);
+            ctx.quadraticCurveTo(-20, 60, 30, 85);    // Top wavy edge
+            ctx.quadraticCurveTo(90, 70, 100, 140);   // Upper right bulge
+            ctx.quadraticCurveTo(120, 220, 50, 270);  // Lower right curve
+            ctx.quadraticCurveTo(0, 320, -50, 260);   // Bottom rounded basin
+            ctx.quadraticCurveTo(-110, 280, -110, 180); // Lower left bulge
+            ctx.quadraticCurveTo(-120, 100, -70, 80); // Upper left curve
+            ctx.fill();
+
+            // Inner solid ice core (Follows the same lumpy, rounded contour)
+            ctx.fillStyle = `rgba(180, 230, 255, ${alpha * 0.1})`;
+            ctx.beginPath();
+            ctx.moveTo(-45, 105);
+            ctx.quadraticCurveTo(-10, 90, 20, 110);
+            ctx.quadraticCurveTo(60, 100, 70, 150);
+            ctx.quadraticCurveTo(90, 210, 30, 240);
+            ctx.quadraticCurveTo(-10, 280, -35, 230);
+            ctx.quadraticCurveTo(-80, 250, -85, 170);
+            ctx.quadraticCurveTo(-90, 120, -45, 105);
+            ctx.fill();
+
+            // 1. DRILL TUBES (Going down into the ice)
+            const tubeWidth = 6;
+            // Use the newly calculated dynamic depth, fallback to 30 just in case
+            const tubeDepth = obj.currentDepth || 30;
+            const xOffsets = [-25, 0, 25]; // Left, Middle, Right tubes
+
+            xOffsets.forEach(offsetX => {
+                // Base Metallic Layer (Always present)
+                ctx.fillStyle = `rgba(100, 100, 100, ${alpha})`;
+                ctx.fillRect(offsetX - tubeWidth / 2, -10, tubeWidth, tubeDepth);
+
+                // Heat Overlay Layer (Fades in over 2 seconds when powered)
+                if (obj.powerHeat > 0) {
+                    const heatGrad = ctx.createLinearGradient(0, -10, 0, tubeDepth);
+                    heatGrad.addColorStop(0, `rgba(180, 50, 50, 0)`); // Cold at the top
+                    heatGrad.addColorStop(0.6, `rgba(180, 50, 50, ${alpha * obj.powerHeat})`); // Heating up midway
+                    heatGrad.addColorStop(1, `rgba(255, 40, 0, ${alpha * obj.powerHeat})`); // Glowing hot at the tip
+
+                    ctx.fillStyle = heatGrad;
+                    ctx.fillRect(offsetX - tubeWidth / 2, -10, tubeWidth, tubeDepth);
+                }
+
+                // Black outline
+                ctx.strokeStyle = `rgba(0, 0, 0, ${alpha * 0.5})`;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(offsetX - tubeWidth / 2, -10, tubeWidth, tubeDepth);
+
+                // Optional: Add small "drill bit" ridges
+                ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.2})`;
+                for (let j = 0; j < tubeDepth; j += 15) {
+                    ctx.beginPath();
+                    ctx.moveTo(offsetX - tubeWidth / 2, j - 10);
+                    ctx.lineTo(offsetX + tubeWidth / 2, j - 5);
+                    ctx.stroke();
+                }
+            });
+
+            // 2. MAIN STRUCTURE: Pressurized Dome & Foundation
+            ctx.fillStyle = `rgba(60, 90, 110, ${alpha})`;
+            ctx.strokeStyle = `rgba(0,0,0,${alpha})`;
+            ctx.lineWidth = 1.5;
+
+            // Foundation (slightly deeper to cover tube tops)
+            ctx.fillRect(-40, -10, 80, 20);
+            ctx.strokeRect(-40, -10, 80, 20);
+
+            // Biosphere Dome
+            ctx.beginPath();
+            ctx.arc(0, -10, 30, Math.PI, 0);
+            ctx.fill();
+            ctx.stroke();
+
+            // 3. VENT SYSTEM: The Air Pump
+            ctx.fillStyle = `rgba(130, 130, 130, ${alpha})`;
+            ctx.fillRect(-8, -45, 16, 15);
+            ctx.strokeRect(-8, -45, 16, 15);
+
+            // Status Light
+            ctx.fillStyle = `rgba(100, 255, 100, ${alpha * (0.5 + Math.sin(cosmeticObjPulse) * 0.3)})`;
+            ctx.fillRect(-4, -40, 8, 5);
+
+            // 4. AIR PARTICLE GENERATION
+            // Determine if this station is currently receiving beamed power
+            const isPowered = backgroundObjects.some(b => b.type === 'SpaceArray' && b.deployed >= 100);
+
+            // Only release visual air if the game is active AND the station is powered
+            if (!splashActive && isPowered && Math.random() > 0.85) {
+                smokeTrail.push({
+                    x: obj.x, // perfectly centered horizontally on the upright station
+                    y: obj.y - (45 * obj.size), // matches exact vent height, factoring in object scaling
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: -15 - Math.random() * 20,
+                    life: 1.2, size: 1.5, plasma: false, isOrange: false, isAir: true
+                });
+            }
+            ctx.restore();
+        }
+
+
+        function drawBioStation(ctx, obj, alpha) {
+            ctx.save();
+            ctx.translate(obj.x, obj.y);
+            ctx.scale(obj.size, obj.size);
+
+            const archColor = '#94a3b8'; // Slate grey for the support arch
+            const glassColor = 'rgba(0, 240, 255, 0.2)';
+            const plantColor = '#2d5a2d';
+
+            // 1. Foundation Base
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(-60, 0, 120, 8);
+            ctx.strokeRect(-60, 0, 120, 8);
+
+            // 2. The Main Inner Biome (The rounded "tunnel")
+            ctx.fillStyle = glassColor;
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, -30, 40, Math.PI, 0); // Rounded dome tunnel
+            ctx.lineTo(40, 0);
+            ctx.lineTo(-40, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // 3. The Greenery (Plants inside)
+            ctx.fillStyle = plantColor;
+            ctx.beginPath();
+            ctx.arc(0, -5, 30, Math.PI, 0);
+            ctx.fill();
+
+            // 4. Foreground Structural Arch (The "Rib" that gives it depth)
+            ctx.strokeStyle = archColor;
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.arc(0, -30, 45, Math.PI, 0); // Larger arch over the dome
+            ctx.stroke();
+
+            // Arch support legs
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(-45, -30); ctx.lineTo(-45, 0);
+            ctx.moveTo(45, -30); ctx.lineTo(45, 0);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+
+
+
+
+
+        function drawHarvester(ctx, obj, alpha) {
+            ctx.save();
+            ctx.translate(obj.x, obj.y);
+            ctx.rotate(obj.angle);
+            ctx.scale(obj.size, obj.size);
+
+            // 1. DUST PUFFS FROM THE FRONT CRAWLERS
+            if (!splashActive && Math.random() > 0.4) {
+                smokeTrail.push({
+                    x: obj.x + (obj.direction * 30),
+                    y: obj.y + 5,
+                    vx: -obj.direction * (10 + Math.random() * 15),
+                    vy: -(2 + Math.random() * 5),
+                    life: 0.6, size: 3, plasma: false, isOrange: false
+                });
+            }
+
+            // 2. MAIN RIG CHASSIS (Industrial Cab & Piping structures)
+            ctx.fillStyle = '#4a4e51'; // Dark industrial gray
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 2;
+
+            // Core frame superstructure
+            ctx.fillRect(-30, -45, 85, 35);
+            ctx.strokeRect(-30, -45, 85, 35);
+
+            // Command Bridge / Crew Cabin
+            ctx.fillStyle = '#2c3539';
+            ctx.fillRect(15, -65, 35, 25);
+            ctx.strokeRect(15, -65, 35, 25);
+
+            // Glowing Orange Cabin Windows
+            ctx.fillStyle = 'rgba(255, 165, 0, 0.85)';
+            ctx.fillRect(22, -60, 8, 8);
+            ctx.fillRect(36, -60, 10, 8);
+
+            // Exhaust Smokestacks
+            ctx.fillStyle = '#222';
+            ctx.fillRect(-5, -60, 6, 15);
+            ctx.fillRect(-15, -57, 5, 12);
+
+            // Engine Vent Particles
+            if (Math.random() > 0.75) {
+                smokeTrail.push({
+                    x: obj.x - 5 * obj.size, y: obj.y - 62 * obj.size,
+                    vx: -5, vy: -25, life: 0.8, size: 1.5, plasma: false, isOrange: false
+                });
+            }
+
+            // 4. ROTATING BUCKET WHEEL ARM (The Boom support)
+            ctx.strokeStyle = '#373a3c';
+            ctx.lineWidth = 8;
+            ctx.beginPath();
+            ctx.moveTo(-10, -30);
+            ctx.lineTo(-65, -20); // Extends backward toward the trench
+            ctx.stroke();
+
+            // Boom hydraulic pistons
+            ctx.strokeStyle = '#999';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(5, -40);
+            ctx.lineTo(-45, -24);
+            ctx.stroke();
+
+            // 5. THE ROTATING EXCAVATOR RING 
+            ctx.save();
+            ctx.translate(-65, -20);
+            ctx.rotate(obj.ringRotation);
+
+            const ringRadius = 38;
+
+            // Outer Steel Ring Rim
+            ctx.strokeStyle = '#5a5d64';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Inner Support Structural Hub
+            ctx.fillStyle = '#2a2c2e';
+            ctx.beginPath();
+            ctx.arc(0, 0, 12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Structural Hub Spokes
+            ctx.strokeStyle = '#3a3d40';
+            ctx.lineWidth = 3;
+            for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(Math.cos(a) * ringRadius, Math.sin(a) * ringRadius);
+                ctx.stroke();
+            }
+
+            // Digging Teeth / Buckets + Warning Indicators
+            for (let a = 0; a < Math.PI * 2; a += Math.PI / 6) {
+                ctx.save();
+                ctx.rotate(a);
+                ctx.translate(ringRadius, 0);
+
+                // Wedge Digging Tooth
+                ctx.fillStyle = '#1e2022';
+                ctx.beginPath();
+                ctx.moveTo(0, -6);
+                ctx.lineTo(10, -3);
+                ctx.lineTo(10, 3);
+                ctx.lineTo(0, 6);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                // High-visibility glowing perimeter marker lights
+                ctx.fillStyle = 'rgba(25ating5, 230, 50, 0.9)'; // Bright hazard yellow
+                ctx.beginPath();
+                ctx.arc(-4, 0, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+            ctx.restore(); // End Ring rotation Matrix
+
+            ctx.restore();
+        }
+
+        function drawStore(ctx, obj, alpha) {
+            ctx.save();
+            ctx.translate(obj.x, obj.y);
+            ctx.scale(obj.size, obj.size);
+            ctx.rotate(obj.angle);
+
+            // 1. Foundation/Brick Base
+            ctx.fillStyle = `rgba(140, 50, 40, ${alpha})`; // Red brick hue
+            ctx.fillRect(-35, -5, 70, 5);
+
+            // 2. Main Store Body Structure
+            ctx.fillStyle = `rgba(210, 200, 180, ${alpha})`; // Off-white modern store siding
+            ctx.fillRect(-30, -35, 60, 30);
+            ctx.strokeStyle = `rgba(40, 40, 40, ${alpha})`;
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(-30, -35, 60, 30);
+
+            // 3. Glass Front Store Doors
+            ctx.fillStyle = `rgba(0, 180, 220, ${alpha * 0.5})`;
+            ctx.fillRect(-10, -20, 20, 15);
+            ctx.strokeRect(-10, -20, 20, 15);
+
+            // 4. Structural Roof Sign Beam Support
+            ctx.fillStyle = `rgba(60, 60, 60, ${alpha})`;
+            ctx.fillRect(-15, -45, 30, 10);
+            ctx.strokeRect(-15, -45, 30, 10);
+
+            // 5. Try Drawing Cached Business Logo Asset Frame
+            if (storeLogos[obj.logoIndex] && storeLogos[obj.logoIndex].complete) {
+                // Draws image directly inside structural roof frame housing
+                ctx.drawImage(storeLogos[obj.logoIndex], -20, -55, 40, 40);
+            } else {
+                // Fallback neon placeholder if image fails loading asset pipeline
+                ctx.fillStyle = `rgba(0, 255, 100, ${alpha})`;
+                ctx.font = 'bold 6px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText("STORE", 0, -38);
+            }
+
+            ctx.restore();
+        }
+
+
+
+        function drawRocket(ctx, obj, type) {
+            if (obj.exploded) return; ctx.save(); ctx.translate(obj.x, obj.y); ctx.rotate(obj.angle + Math.PI / 2); ctx.fillStyle = obj.color; ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1;
+            if (type === 'ship') {
+                ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(7.2, -10); ctx.lineTo(8.1, 20); ctx.lineTo(-8.1, 20); ctx.lineTo(-7.2, -10); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath(); ctx.moveTo(-7.7, -10); ctx.lineTo(7.7, -10); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-8.1, 10); ctx.lineTo(8.1, 10); ctx.stroke(); ctx.beginPath(); ctx.moveTo(3.6, -10); ctx.lineTo(3.6, 20); ctx.stroke();
+                ctx.fillStyle = (doorOpen && satInventory > 0) ? '#004d4d' : '#007a7a'; ctx.fillRect(-4.5, 5, 9, 4); ctx.strokeRect(-4.5, 5, 9, 4);
+            } else if (type === 'heavy') {
+                // Main Core
+                ctx.fillRect(-8.1, -24, 16.2, 48); ctx.strokeRect(-8.1, -24, 16.2, 48);
+                // Side Boosters (Attached to the core, same color, narrower)
+                [-14, 14].forEach(offset => {
+                    ctx.save(); ctx.translate(offset, 4); ctx.fillRect(-5, -20, 10, 40); ctx.strokeRect(-5, -20, 10, 40);
+                    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.moveTo(-5, -20); ctx.lineTo(0, -30); ctx.lineTo(5, -20); ctx.fill(); ctx.restore();
+                });
+                ctx.strokeStyle = '#000000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-3, -18); ctx.lineTo(3, -18); ctx.stroke();
+                ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-8.1, -12); ctx.lineTo(8.1, -12); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-8.1, 6); ctx.lineTo(8.1, 6); ctx.stroke();
+            } else {
+                ctx.fillRect(-8.1, -24, 16.2, 48); ctx.strokeRect(-8.1, -24, 16.2, 48); ctx.strokeStyle = '#000000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-3, -18); ctx.lineTo(3, -18); ctx.stroke();
+                ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-8.1, -12); ctx.lineTo(8.1, -12); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-8.1, 6); ctx.lineTo(8.1, 6); ctx.stroke();
+            }
+            // Landing Gear
+            if (type === 'ship' || obj.legsVisible) {
+                ctx.strokeStyle = obj.color; ctx.beginPath(); const yL = (type === 'booster' || type === 'heavy') ? 18 : 15; const oX = (type === 'heavy') ? 19 : 8.1;
+                ctx.moveTo(-oX, yL); ctx.lineTo(-(oX + 8), yL + 10); ctx.lineTo(-(oX + 12), yL + 10); ctx.moveTo(oX, yL); ctx.lineTo(oX + 8, yL + 10); ctx.lineTo(oX + 12, yL + 10); ctx.stroke();
+            }
+            // Flames
+            const act = !separated ? (obj === booster && ship.thrusting) : obj.thrusting, cF = (!separated && obj === booster) ? booster.fuel : obj.fuel;
+            if (act && (cF > 0 || !separated) && !obj.landed) {
+                const grad = ctx.createLinearGradient(0, 20, 0, 60); grad.addColorStop(0, '#ffcc00'); grad.addColorStop(0.5, '#ff6600'); grad.addColorStop(1, 'transparent'); ctx.fillStyle = grad;
+                const yS = (type === 'booster' || type === 'heavy') ? 24 : 20;
+                const fOffs = (type === 'heavy') ? [-14, 0, 14] : [0];
+                fOffs.forEach(fX => {
+                    // If fX is 0, it's the center (size 4/40). If not, it's a side booster (size 3/25).
+                    const fW = (fX === 0) ? 4 : 3; const fL = (fX === 0) ? 40 : 25;
+                    ctx.beginPath(); ctx.moveTo(fX - fW, yS); ctx.quadraticCurveTo(fX, yS + fL, fX + fW, yS); ctx.fill();
+                });
+            } ctx.restore();
+        }
+
+        function drawSpaceArray(ctx, obj, targetX, targetY) {
+            if (obj.exploded) return;
+
+            ctx.save();
+            // Position and rotate the main satellite body
+            ctx.translate(obj.x, obj.y);
+            ctx.rotate(obj.angle);
+            ctx.scale(obj.size, obj.size);
+
+            // 1. Draw Main Satellite Bus
+            ctx.fillStyle = obj.color || '#b0b0b0';
+            ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+            ctx.lineWidth = 1;
+            ctx.fillRect(-10, -10, 20, 20);
+            ctx.strokeRect(-10, -10, 20, 20);
+
+            // 2. Draw Solar Panels
+            // Calculate current deployment factor (0.0 to 1.0)
+            const deployFactor = Math.min(Math.max((obj.deployed || 0) / 100, 0), 1);
+            const panelW = (obj.panelWidth || 60) * deployFactor;
+            const panelH = 15;
+
+            if (deployFactor > 0) {
+                ctx.fillStyle = '#224488';
+
+                // Left Wing
+                ctx.fillRect(-panelW - 10, -panelH / 2, panelW, panelH);
+                ctx.strokeRect(-panelW - 10, -panelH / 2, panelW, panelH);
+
+                // Right Wing
+                ctx.fillRect(10, -panelH / 2, panelW, panelH);
+                ctx.strokeRect(10, -panelH / 2, panelW, panelH);
+
+                // Add grid lines (only for the deployed portion)
+                ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+                for (let i = 0; i < panelW; i += 10) {
+                    ctx.beginPath();
+                    ctx.moveTo(10 + i, -panelH / 2); ctx.lineTo(10 + i, panelH / 2);
+                    ctx.moveTo(-10 - i, -panelH / 2); ctx.lineTo(-10 - i, panelH / 2);
+                    ctx.stroke();
+                }
+            }
+
+            // 3. The Energy Beam
+            // Only draw if fully deployed (or nearly so)
+            if (obj.isBeaming && deployFactor >= 1) {
+                ctx.restore();
+                ctx.save();
+
+                const beamGrad = ctx.createLinearGradient(obj.x, obj.y, targetX, targetY);
+                beamGrad.addColorStop(0, 'rgba(200, 50, 50, 0.5)');
+                beamGrad.addColorStop(0.5, 'rgba(200, 50, 50, 0.3)');
+                beamGrad.addColorStop(1, 'transparent');
+
+                ctx.strokeStyle = beamGrad;
+                ctx.lineWidth = 4 + Math.sin(Date.now() / 100) * 2;
+                ctx.lineCap = 'round';
+
+                ctx.beginPath();
+                ctx.moveTo(obj.x, obj.y);
+                ctx.lineTo(targetX, targetY);
+                ctx.stroke();
+
+                ctx.fillStyle = 'rgba(200, 50, 50, 0.5)';
+                ctx.beginPath();
+                ctx.arc(targetX, targetY, 8 + Math.random() * 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.restore();
+        }
+
+
+        function drawLunarWheel(ctx, x, y, radius) {
+            ctx.save();
+            ctx.translate(x, y);
+
+            // Outer pressurized honeycomb tire
+            ctx.fillStyle = '#1e2124';
+            ctx.strokeStyle = '#5a6268';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Futuristic glowing hubcap drive motor
+            ctx.fillStyle = '#2d3238';
+            ctx.strokeStyle = '#00ffff'; // Electric cyan hub accents
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.45, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Central titanium axle node
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(0, 0, 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawLunarSemi(ctx, obj, alpha) {
+            ctx.save();
+            ctx.translate(obj.x, obj.y);
+            ctx.rotate(obj.angle);
+            // Auto-flip graphics context depending on travel direction vector
+            ctx.scale(obj.size * obj.direction, obj.size);
+
+            // Create suspension bob based on its runtime frame counter
+            const cabBob = Math.sin(obj.bounceTimer) * 0.8;
+
+            // 1. TYPICAL SURFACE GROUND DUST
+            if (!splashActive && Math.random() > 0.6) {
+                smokeTrail.push({
+                    x: obj.x - (obj.direction * 25),
+                    y: obj.y + 2,
+                    vx: -obj.direction * (15 + Math.random() * 20),
+                    vy: -(1 + Math.random() * 4),
+                    life: 0.4, size: 2, plasma: false, isOrange: false
+                });
+            }
+
+            // 2. MAIN FLATBED LOWER FRAME RAIL
+            ctx.fillStyle = '#25282a';
+            ctx.strokeStyle = '#4b5154';
+            ctx.lineWidth = 1.5;
+            ctx.fillRect(-65, -10, 110, 6);
+            ctx.strokeRect(-65, -10, 110, 6);
+
+            // Articulation hitch joint coupling link
+            ctx.fillStyle = '#777';
+            ctx.fillRect(-18, -13, 8, 4);
+
+            // 3. REAR DETACHABLE FREIGHT CARGO POD (The Semi Trailer)
+            ctx.save();
+            ctx.translate(0, cabBob * 0.3); // Trailer has heavier dampening, bobs less
+
+            // Metallic container panel shell
+            ctx.fillStyle = '#5c6368'; // Cargo aluminum sheen
+            ctx.strokeStyle = '#1c1e20';
+            ctx.lineWidth = 2;
+            ctx.fillRect(-65, -34, 45, 24);
+            ctx.strokeRect(-65, -34, 45, 24);
+
+            // Diagonal structural support geometric reinforcement ribs
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+            ctx.lineWidth = 1.5;
+            for (let i = -60; i <= -25; i += 10) {
+                ctx.beginPath();
+                ctx.moveTo(i, -34); ctx.lineTo(i + 5, -10);
+                ctx.stroke();
+            }
+
+            // Hazard Caution Lights along top cargo edge
+            ctx.fillStyle = 'rgba(255, 60, 60, 0.8)'; // Red rear marker LEDs
+            ctx.fillRect(-65, -34, 3, 3);
+            ctx.fillStyle = 'rgba(255, 165, 0, 0.8)'; // Amber side lights
+            ctx.fillRect(-45, -34, 3, 3);
+            ctx.fillRect(-25, -34, 3, 3);
+            ctx.restore();
+
+            // 4. THE COMMAND CABIN (The Semi Tractor Head Unit)
+            ctx.save();
+            ctx.translate(0, cabBob); // Cab takes brunt of suspension bounce
+
+            // Primary aerodynamically angular windshield cab housing profile
+            ctx.fillStyle = '#d1d5db'; // Stark off-white solar shield painting
+            ctx.strokeStyle = '#111';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(-10, -10);
+            ctx.lineTo(-10, -38);
+            ctx.lineTo(20, -38);
+            ctx.lineTo(42, -22); // Angled blast-shield front visor wedge
+            ctx.lineTo(42, -10);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Glowing Electro-Chromatic Cyan Window Shielding Panels
+            ctx.fillStyle = 'rgba(0, 240, 255, 0.75)';
+            ctx.beginPath();
+            ctx.moveTo(12, -34);
+            ctx.lineTo(22, -34);
+            ctx.lineTo(35, -23);
+            ctx.lineTo(12, -23);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Side Operations Door Glass
+            ctx.fillRect(-2, -34, 10, 11);
+            ctx.strokeRect(-2, -34, 10, 11);
+
+            // Top Mounted Satellite Comms Antenna Array Rig
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(5, -38);
+            ctx.lineTo(0, -46);
+            ctx.stroke();
+            ctx.fillStyle = '#ff3b30'; // Little warning beacon light tip
+            ctx.beginPath();
+            ctx.arc(0, -47, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Front High-Intensity LED Headlight Beam Ring
+            const headlightFlash = Math.sin(performance.now() / 50) > 0;
+            ctx.fillStyle = headlightFlash ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 200, 0.7)';
+            ctx.fillRect(42, -18, 2, 5);
+
+            ctx.restore();
+
+            // 5. CRAWLER INDEPENDENT DRIVE WHEELS (6-Wheel Drivetrain Configuration)
+            // Rear Trailer Wheel Set Tandems
+            drawLunarWheel(ctx, -53, -2, 9);
+            drawLunarWheel(ctx, -35, -2, 9);
+
+            // Tractor Chassis Power Axles
+            drawLunarWheel(ctx, 3, -2, 9);
+            drawLunarWheel(ctx, 28, -2, 9);
+
+            ctx.restore();
+        }
+
+
+
+        function drawThreeBody(vCtx) {
+
+            if (splashActive) return;
+
+            // 1. Draw the massive overlapping gravity loop paths
+            threeBodySystem.suns.forEach(sun => {
+                if (sun.trail.length < 2) return;
+                vCtx.save();
+                vCtx.beginPath();
+                vCtx.moveTo(sun.trail[0].x, sun.trail[0].y);
+                for (let i = 1; i < sun.trail.length; i++) {
+                    vCtx.lineTo(sun.trail[i].x, sun.trail[i].y);
+                }
+                vCtx.strokeStyle = sun.color;
+                vCtx.globalAlpha = 0.15; // Elegant background trace line
+                vCtx.lineWidth = 3;
+                vCtx.stroke();
+                vCtx.restore();
+            });
+
+            // 2. Draw the three glowing Suns (Now faded and soft)
+            threeBodySystem.suns.forEach(sun => {
+                if (sun.x === 0 || !isFinite(sun.x)) return;
+
+                vCtx.save();
+
+                const skyProgress = o2Level / 100;
+                // LOWERED OPACITY: Dropped the baseline from 0.7 down to 0.35 max transparency
+                vCtx.globalAlpha = Math.max(0.08, 0.6 - (skyProgress * 0.25));
+
+                // Radiant muted glow layer
+                const gradient = vCtx.createRadialGradient(sun.x, sun.y, 1, sun.x, sun.y, sun.r * 5);
+                gradient.addColorStop(0, sun.glow);
+                gradient.addColorStop(0.5, sun.glow);
+                gradient.addColorStop(1, 'transparent');
+
+                vCtx.fillStyle = gradient;
+                vCtx.beginPath();
+                vCtx.arc(sun.x, sun.y, sun.r * 5, 0, Math.PI * 2);
+                vCtx.fill();
+
+                // SOFT INNER CORE: Changed from solid bright cream/white 
+                // to a slightly transparent version of the sun's own base color
+                vCtx.fillStyle = sun.color;
+                vCtx.globalAlpha *= 0.6; // Extra dimming layer just for the center core
+                vCtx.beginPath();
+                vCtx.arc(sun.x, sun.y, sun.r * 0.6, 0, Math.PI * 2);
+                vCtx.fill();
+
+                vCtx.restore();
+            });
+        }
+
+        function drawAlien(vCtx) {
+
+            // --- DRAW ALIEN SHIP AND LASER PROJECTILES ---
+            if (!splashActive) {
+                // 1. Render Alien Ship jpg Instance
+                if (alienShip.active && alienImg.complete) {
+                    vCtx.save();
+                    vCtx.translate(alienShip.x, alienShip.y);
+                    // Flips the texture orientation depending on direction vectors
+                    vCtx.scale(alienShip.direction * -1, 1);
+                    vCtx.globalAlpha = 0.7;
+                    // Draw image frame centered around anchor point coordinates
+                    vCtx.drawImage(alienImg, -alienShip.width / 2, -alienShip.height / 2, alienShip.width, alienShip.height);
+
+                    // Floating halo above the alien ship
+                    vCtx.strokeStyle = 'rgba(0, 255, 100, 0.8)'; // Increased opacity so it pops
+                    vCtx.lineWidth = 3;
+
+                    // Optional: Add a neon glow to the halo
+                    vCtx.shadowBlur = 10;
+                    vCtx.shadowColor = '#00ff64';
+
+                    vCtx.beginPath();
+                    // ellipse(x, y, radiusX, radiusY, rotation, startAngle, endAngle)
+                    // -alienShip.height / 2 finds the top of the ship, subtracting 12 pushes it up into the air
+                    vCtx.ellipse(0, -alienShip.height / 2 - 12, alienShip.width * 0.25, 5, 0, 0, Math.PI * 2);
+                    vCtx.stroke();
+
+                    // Reset shadow so it doesn't accidentally bleed into other drawings
+                    vCtx.shadowBlur = 0;
+
+                    vCtx.restore();
+                }
+
+                // 2. Render Vivid Neon Space Laser Blasts
+                alienLasers.forEach(laser => {
+                    vCtx.save();
+                    vCtx.lineCap = 'round'; // Gives the laser smooth, rounded energy tips
+
+                    // Layer 1: The Outer Halo
+                    vCtx.strokeStyle = 'rgba(255, 0, 85, 0.4)'; // Transparent hot pink
+                    vCtx.lineWidth = laser.width * 3;         // Wide beam
+                    vCtx.shadowBlur = 20;                       // Large shadow spread
+                    vCtx.shadowColor = '#ff3300';
+
+                    vCtx.beginPath();
+                    vCtx.moveTo(laser.x, laser.y - laser.height / 2 - 4);
+                    vCtx.lineTo(laser.x, laser.y + laser.height / 2 + 4);
+                    vCtx.stroke();
+
+                    // Layer 2: The Hot Core
+                    vCtx.strokeStyle = '#ffffff';               // Pure white core makes it look hot
+                    vCtx.lineWidth = laser.width;               // Original width
+                    vCtx.shadowBlur = 10;                       // Tighter shadow
+                    vCtx.shadowColor = '#ff0055';               // Pink inner glow
+
+                    vCtx.beginPath();
+                    vCtx.moveTo(laser.x, laser.y - laser.height / 2 - 4);
+                    vCtx.lineTo(laser.x, laser.y + laser.height / 2 + 4);
+                    vCtx.stroke();
+
+                    vCtx.restore();
+                });
+            }
+        }
+
+
+        function draw() {
+
+            vCtx.fillStyle = '#000'; vCtx.fillRect(0, 0, virtualWidth, virtualHeight); stars.forEach(s => { vCtx.fillStyle = `rgba(255,255,255,${s.opacity})`; vCtx.fillRect(s.x, s.y, s.size, s.size); });
+
+
+            // 1. Calculate progress (0.0 to 1.0)
+            //const progress = Math.min(uiState.satCount / 300, 1);
+            const progress = o2Level / 100;
+
+            // 2. Create a Gradient (Top to Bottom)
+            // We want the top of the sky to stay darker (space) 
+            // and the bottom to become blue (thick air)
+            const skyGrad = vCtx.createLinearGradient(0, 0, 0, virtualPlayHeight);
+
+            // The Top: Always stays black
+            skyGrad.addColorStop(0, '#000000');
+
+            // The Transition: Space starts turning blue-ish as air builds
+            const midG = Math.floor(40 * progress);
+            const midB = Math.floor(80 * progress);
+            skyGrad.addColorStop(0.5, `rgb(0, ${midG}, ${midB})`);
+
+            // The Bottom (Horizon): Becomes the bright air color you chose
+            const skyG = Math.floor(100 * progress);
+            const skyB = Math.floor(200 * progress);
+            skyGrad.addColorStop(1, `rgb(0, ${skyG}, ${skyB})`);
+
+            // 3. Fill the whole play area starting from Y=0
+            vCtx.fillStyle = skyGrad;
+            vCtx.fillRect(0, 0, virtualWidth, virtualPlayHeight);
+
+            // This makes the ground look like it's holding onto the thickest air
+            if (progress > 0.1) {
+                const haze = vCtx.createLinearGradient(0, TARGET_ALT_Y, 0, virtualPlayHeight);
+                haze.addColorStop(0, 'transparent');
+                haze.addColorStop(1, `rgba(255, 255, 255, ${progress * 0.3})`); // White "mist" near ground
+                vCtx.fillStyle = haze;
+                vCtx.fillRect(0, 0, virtualWidth, virtualPlayHeight);
+            }
+
+            // 4. Draw Stars with "Atmospheric Interference"
+            stars.forEach(s => {
+                // Stars twinkle less and fade out as the blue sky overpowers them
+                const starAlpha = s.opacity * (1 - progress);
+                if (starAlpha > 0.05) {
+                    vCtx.fillStyle = `rgba(255, 255, 255, ${starAlpha})`;
+                    vCtx.fillRect(s.x, s.y, s.size, s.size);
+                }
+            });
+
+            // Clear Screen
+            vCtx.save(); vCtx.setLineDash([10, 10]); vCtx.lineWidth = 1; vCtx.strokeStyle = 'rgba(100, 100, 100, 1)'; vCtx.beginPath(); vCtx.moveTo(0, TARGET_ALT_Y - ALT_ENVELOPE); vCtx.lineTo(width, TARGET_ALT_Y - ALT_ENVELOPE); vCtx.moveTo(0, TARGET_ALT_Y + ALT_ENVELOPE); vCtx.lineTo(width, TARGET_ALT_Y + ALT_ENVELOPE); vCtx.stroke(); vCtx.restore();
+
+            // Planet
+            if (planetImg.complete) { vCtx.save(); vCtx.globalAlpha = 0.5; vCtx.drawImage(planetImg, 1200, 100, 110, 58); vCtx.restore(); }
+
+            // Three Body
+            drawThreeBody(vCtx);
+
+
+            // Draw Radar Bullets
+            radarBullets.forEach(b => {
+                vCtx.fillStyle = '#ffff00'; // Yellow tracers
+                vCtx.beginPath();
+                vCtx.arc(b.x, b.y, 3, 0, Math.PI * 2);
+                vCtx.fill();
+            });
+
+            // Draw Terrain
+            // vCtx.strokeStyle = '#444'; vCtx.lineWidth = 1.5; vCtx.beginPath(); vCtx.moveTo(terrain[0].x, terrain[0].y); terrain.forEach(p => vCtx.lineTo(p.x, p.y)); vCtx.stroke();
+            // --- DRAW SOLID MOON SURFACE ---
+            vCtx.beginPath();
+            // 1. Start at the first point of the terrain
+            vCtx.moveTo(terrain[0].x, terrain[0].y);
+            // 2. Trace the jagged surface
+            terrain.forEach(p => vCtx.lineTo(p.x, p.y));
+            // 3. Close the shape: Draw down to the bottom right, then bottom left
+            vCtx.lineTo(virtualWidth, virtualPlayHeight); // Bottom Right
+            vCtx.lineTo(0, virtualPlayHeight);            // Bottom Left
+            vCtx.closePath();
+            // 4. Fill the moon solid gray (This overwrites the blue atmosphere below the line)
+            vCtx.fillStyle = '#1a1a1a'; // Deep Lunar Gray
+            vCtx.fill();
+            // 5. Draw the surface line on top for definition
+            vCtx.strokeStyle = '#444';
+            vCtx.lineWidth = 2;
+            vCtx.stroke();
+
+
+            // Alien Ship & missles
+            drawAlien(vCtx);
+
+            // Craters
+            craters.forEach(c => { vCtx.strokeStyle = `rgba(120, 120, 120, ${c.alpha})`; vCtx.lineWidth = 2; vCtx.beginPath(); vCtx.ellipse(c.x, c.y, c.radiusX, c.radiusY, 0, 0, Math.PI * 2); vCtx.stroke(); });
+
+
+            // Draw Background Objects
+            backgroundObjects.forEach(obj => {
+                if (!obj.crashed) {
+                    if (obj.type === 'Terraform') drawTerraForm(vCtx, obj, obj.alpha);
+                    if (obj.type === 'Eagle') drawCosmeticEagle(vCtx, obj, obj.alpha);
+                    if (obj.type === 'Radar') drawCosmeticRadarStation(vCtx, obj, obj.alpha);
+                    if (obj.type === 'Buggy') drawCosmeticBuggy(vCtx, obj, obj.alpha);
+                    if (obj.type === 'Cloud') drawCloud(vCtx, obj, obj.alpha);
+                    if (obj.type === 'Farm') drawFarmingPlot(vCtx, obj, obj.alpha);
+                    if (obj.type === 'Harvester') drawHarvester(vCtx, obj, obj.alpha);
+                    if (obj.type === 'LunarSemi') drawLunarSemi(vCtx, obj, obj.alpha);
+                    if (obj.type === 'Store') drawStore(vCtx, obj, obj.alpha);
+                    // Add this inside the backgroundObjects.forEach loop:
+                    if (obj.type === 'BioStation') drawBioStation(vCtx, obj, obj.alpha);
+                    if (obj.type === 'SpaceArray') {
+                        // FIND THE TERRAFORM STATION
+                        const station = backgroundObjects.find(b => b.type === 'Terraform');
+
+                        // If the station exists, beam to its coordinates. 
+                        // Otherwise, beam straight down.
+                        const targetX = station ? station.x : obj.x;
+                        const targetY = station ? station.y : height - 100;
+
+                        // Activate the beam property
+                        obj.isBeaming = true;
+
+                        drawSpaceArray(vCtx, obj, targetX, targetY);
+                    }
+                }
+            });
+
+
+
+
+            //drawRocket(vCtx, ship, 'ship'); drawRocket(vCtx, booster, 'booster'); 
+            legacySats.forEach(s => { vCtx.fillStyle = `rgba(180, 240, 255, ${s.opacity})`; vCtx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size); });
+
+            // Draw Rocket (Ship and Booster)
+            drawRocket(vCtx, ship, 'ship');
+            drawRocket(vCtx, booster, booster.config);
+
+            legacySats.forEach(s => { vCtx.fillStyle = `rgba(180, 240, 255, ${s.opacity})`; vCtx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size); });
+
+            // // Draw Satellites
+            // satellites.forEach(s => {
+            //     const hR = Math.min(s.heat / 5, 1);
+            //     // Base colors: Dark gray (Inactive) -> Blue/White (Active)
+            //     let r = 60, g = 60, b = 60;
+            //     if (s.activated) { r = 180; g = 240; b = 255; } else if (s.flicker) { r = 255; g = 255; b = 255; }
+            //     // Heat Override: Priority 1 (Forces red/orange if falling)
+            //     if (hR > 0.05) { r = Math.floor(r * (1 - hR) + 255 * hR); g = Math.floor(g * (1 - hR) + 100 * hR * (1 - hR)); b = Math.floor(b * (1 - hR)); }
+            //     // Draw trail if moving fast/hot or active
+            //     const sL = 0.1 + (hR * 0.8);
+            //     if (s.activated || s.flicker || hR > 0.15) {
+            //         vCtx.save(); const grad = vCtx.createLinearGradient(s.x, s.y, s.x - s.vx * sL, s.y - s.vy * sL);
+            //         grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${s.opacity})`); grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+            //         vCtx.strokeStyle = grad; vCtx.lineWidth = 1 + (hR * 2.5); vCtx.beginPath(); vCtx.moveTo(s.x, s.y); vCtx.lineTo(s.x - s.vx * sL, s.y - s.vy * sL); vCtx.stroke(); vCtx.restore();
+            //     }
+            //     // Draw the actual satellite square
+            //     vCtx.fillStyle = `rgba(${r}, ${g}, ${b}, ${s.opacity})`; vCtx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size);
+            // });
+
+            // Draw Satellites
+            satellites.forEach(s => {
+                const hR = Math.min(s.heat / 5, 1);
+                // Base colors: Dark gray (Inactive) -> Blue/White (Active)
+                let r = 60, g = 60, b = 60;
+                if (s.activated) { r = 180; g = 240; b = 255; } else if (s.flicker) { r = 255; g = 255; b = 255; }
+
+                // Heat Override: Priority 1 (Forces red/orange if falling)
+                if (hR > 0.05) { r = Math.floor(r * (1 - hR) + 255 * hR); g = Math.floor(g * (1 - hR) + 100 * hR * (1 - hR)); b = Math.floor(b * (1 - hR)); }
+
+                // Draw trail if moving fast/hot or active
+                const sL = 0.1 + (hR * 0.8);
+                if (s.activated || s.flicker || hR > 0.15) {
+                    vCtx.save();
+
+                    // --- THE FIX: OPTIMIZED TRAIL RENDER ---
+                    // Replaced the heavy LinearGradient with a lightweight low-opacity stroke
+                    vCtx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${s.opacity * 0.5})`;
+
+                    vCtx.lineWidth = 1 + (hR * 2.5);
+                    vCtx.beginPath();
+                    vCtx.moveTo(s.x, s.y);
+                    vCtx.lineTo(s.x - s.vx * sL, s.y - s.vy * sL);
+                    vCtx.stroke();
+                    vCtx.restore();
+                }
+                // Draw the actual satellite square
+                vCtx.fillStyle = `rgba(${r}, ${g}, ${b}, ${s.opacity})`;
+                vCtx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size);
+            });
+
+
+            // Smoke Trails
+            const now = performance.now(); if (instructionsStartTime && (now - instructionsStartTime) < 5000) { vCtx.save(); vCtx.letterSpacing = "4px"; vCtx.font = '30px monospace'; vCtx.fillStyle = 'rgba(0, 255, 255, 0.7)'; vCtx.textAlign = 'center'; vCtx.textBaseline = 'middle'; vCtx.fillText('Deploy Satellites Into Orbit', width / 2, TARGET_ALT_Y); vCtx.restore(); }
+            smokeTrail.forEach(p => {
+                // let color;
+                // if (p.isAir) color = `rgba(180, 255, 255, ${p.life * 0.4})`; // Light cyan/white for oxygen
+                // else if (p.plasma) color = `rgba(255, ${Math.random() * 150 + 100}, 0, ${p.life * 0.8})`;
+                // else if (p.isOrange) color = `rgba(255, 140, 0, ${p.life * 0.6})`;
+                // else color = `rgba(140,140,140,${p.life * 0.3})`;
+                let color;
+                if (p.isAir) color = `rgba(180, 255, 255, ${p.life * 0.4})`;
+                else if (p.isRed) color = `rgba(255, 20, 60, ${p.life * 0.8})`; // <-- ADD THIS LINE
+                else if (p.plasma) color = `rgba(255, ${Math.random() * 150 + 100}, 0, ${p.life * 0.8})`;
+                else if (p.isOrange) color = `rgba(255, 140, 0, ${p.life * 0.6})`;
+                else color = `rgba(140,140,140,${p.life * 0.3})`;
+
+
+                vCtx.fillStyle = color; vCtx.beginPath(); vCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2); vCtx.fill();
+            });
+
+            pads.forEach(p => { vCtx.strokeStyle = p.owner === 'Ship' ? '#00ffff' : '#ffffff'; vCtx.lineWidth = 6; vCtx.beginPath(); vCtx.moveTo(p.x1 - 5, p.y + 4); vCtx.lineTo(p.x2 + 5, p.y + 4); vCtx.stroke(); if (p.owner === 'Booster') { let cX = (p.x1 + p.x2) / 2; vCtx.strokeStyle = '#303030'; vCtx.lineWidth = 2; vCtx.beginPath(); vCtx.moveTo(cX + 15, p.y); vCtx.lineTo(cX + 15, p.y - 80); vCtx.moveTo(cX + 20, p.y); vCtx.lineTo(cX + 20, p.y - 80); vCtx.stroke(); vCtx.strokeStyle = '#404040'; vCtx.lineWidth = 3; vCtx.beginPath(); vCtx.moveTo(cX + 15, p.y - 59); vCtx.lineTo(cX - 9, p.y - 59); vCtx.stroke(); } });
+
+            // Onscreen Controls
+            drawControls();
+
+            // HUD
+            drawHUD(); const sR = canvas.width / canvas.height, vR = virtualWidth / virtualHeight; let dW, dH, dX, dY; if (sR > vR) { dH = canvas.height; dW = dH * vR; dX = (canvas.width - dW) / 2; dY = 0; } else { dW = canvas.width; dH = dW / vR; dX = 0; dY = (canvas.height - dH) / 2; } ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(offScreenCanvas, 0, 0, virtualWidth, virtualHeight, dX, dY, dW, dH);
+
+
+            // Pads
+            vCtx.strokeStyle = '#555'; vCtx.lineWidth = 9; vCtx.beginPath(); vCtx.moveTo(launchPad.x1, launchPad.y + 5); vCtx.lineTo(launchPad.x2, launchPad.y); vCtx.stroke();
+
+
+
+            // // Use the new layout helper here
+            // const layout = getLayout();
+            // ctx.fillStyle = '#000';
+            // ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // ctx.drawImage(offScreenCanvas, 0, 0, virtualWidth, virtualHeight, layout.dX, layout.dY, layout.dW, layout.dH);
+
+        }
+
+        // Eagle Evasion
+        function handleEagleEvasion() { backgroundObjects.forEach(e => { if (e.type === 'Eagle' && !e.crashed) { let tF = false;[ship, booster].forEach(t => { if (!t.exploded) { const dX = (t.x - e.x) * e.direction, dY = e.y - t.y; if (dX > 0 && dX < 200 && dY > 0 && dY < 300) tF = true; } }); if (tF) { e.direction *= -1; e.x += e.direction * 5; } } }); }
+
+        // window.addEventListener('keydown', e => {
+        //     if (!audioCtx) initAudio(); if (splashActive && e.code === 'Space') { splashActive = false; splashDiv.style.display = 'none'; missionStart = performance.now(); instructionsStartTime = performance.now(); return; }
+        //     if (splashActive) return; activeInputs[e.code] = true; if (e.code === 'KeyR') init(false, true, demoEnabled); if (e.code === 'KeyS' && !separated) { triggerSeparationSmoke((ship.x + booster.x) / 2, (ship.y + booster.y) / 2); playSound('sep'); separated = true; booster.autopilot = true; booster.yv += 22; ship.yv -= 10; }
+        //     if (e.code === 'KeyD') deploySatellites(); if (e.code === 'KeyA') ship.autopilot = !ship.autopilot; if (e.code === 'Space' && gameOver) init(false, true);
+        //     if (e.code === 'KeyE') demoEnabled = !demoEnabled;
+        //     if (e.code === 'KeyW') playWacaWaca(3.0);
+        // });
+        // window.addEventListener('keyup', e => activeInputs[e.code] = false); window.addEventListener('mousedown', () => { if (!audioCtx) initAudio(); });
+
+
+        function updateInputState(code, isPressed) {
+            // ... existing key assignments (ArrowUp, etc) ...
+            if (code === 'ArrowUp') activeInputs['ArrowUp'] = isPressed;
+            if (code === 'ArrowLeft') activeInputs['ArrowLeft'] = isPressed;
+            if (code === 'ArrowRight') activeInputs['ArrowRight'] = isPressed;
+            if (code === 'KeyS') activeInputs['KeyS'] = isPressed;
+            if (code === 'KeyD') activeInputs['KeyD'] = isPressed;
+            if (code === 'KeyA') activeInputs['KeyA'] = isPressed;
+
+            if (isPressed) {
+                // --- ACTION TRIGGERS ---
+                if (code === 'KeyS' && !separated) {
+                    triggerSeparationSmoke((ship.x + booster.x) / 2, (ship.y + booster.y) / 2);
+                    playSound('sep'); separated = true; booster.autopilot = true; booster.yv += 22; ship.yv -= 10;
+                }
+                if (code === 'KeyD') deploySatellites();
+                if (code === 'KeyA') ship.autopilot = !ship.autopilot;
+
+                // --- UTILITY KEYS ---
+                if (code === 'KeyR') init(false, true, demoEnabled);
+                if (code === 'KeyE') demoEnabled = !demoEnabled;
+                if (code === 'KeyW') playWacaWaca(3.0);
+                if (splashActive && code === 'Space') { /* ... existing splash logic ... */ }
+            }
+        }
+
+        window.addEventListener('keydown', (e) => updateInputState(e.code, true));
+        window.addEventListener('keyup', (e) => updateInputState(e.code, false));
+
+
+        window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+
+        function playIntroSong() { if (!audioCtx) initAudio(); const now = audioCtx.currentTime;[[523.25, 0, 0.15], [659.25, 0.2, 0.15], [783.99, 0.4, 0.15], [1046.5, 0.6, 0.3], [783.99, 0.9, 0.1], [1046.5, 1, 0.5]].forEach(([f, d, du]) => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(f, now + d); g.gain.setValueAtTime(0.06, now + d); g.gain.exponentialRampToValueAtTime(0.001, now + d + du); o.connect(g); g.connect(audioCtx.destination); o.start(now + d); o.stop(now + d + du); }); }
+
+        const startLanding = () => { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); init(false); window.removeEventListener('mousedown', startLanding); window.removeEventListener('keydown', startLanding); };
+        window.addEventListener('mousedown', startLanding); window.addEventListener('keydown', startLanding); canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+
+
 
         function demoUpdate() {
             if (splashActive || gameOver) { demoPhase = 'launch'; return; }
 
             const now = performance.now();
-            keys['ArrowRight'] = false;
-            keys['ArrowLeft'] = false;
-            keys['ArrowUp'] = false;
+            activeInputs['ArrowRight'] = false;
+            activeInputs['ArrowLeft'] = false;
+            activeInputs['ArrowUp'] = false;
 
             const targetHSpd = ORBITAL_VELOCITY;
             const distanceToZone = ship.y - TARGET_ALT_Y;
@@ -872,9 +2212,9 @@
 
                 // 2. DYNAMIC THROTTLE (Prioritize Altitude First)
                 if (!trajectoryReady) {
-                    if (ship.yv > -70) keys['ArrowUp'] = true;
+                    if (ship.yv > -70) activeInputs['ArrowUp'] = true;
                 } else {
-                    if (!speedReady && ship.yv > -15) keys['ArrowUp'] = true;
+                    if (!speedReady && ship.yv > -15) activeInputs['ArrowUp'] = true;
                 }
 
                 // 3. STABILIZED TILT (Programmatic Gravity Turn)
@@ -892,7 +2232,7 @@
 
                     if (ship.angle < targetAngle) {
                         // Pulse the right arrow to turn smoothly
-                        if (Math.floor(now / 16) % 2 === 0) keys['ArrowRight'] = true;
+                        if (Math.floor(now / 16) % 2 === 0) activeInputs['ArrowRight'] = true;
                     }
                 }
 
@@ -916,14 +2256,14 @@
             else if (demoPhase === 'vertical_insertion') {
                 const verticalAngle = -Math.PI / 2;
                 if (ship.angle < verticalAngle - 0.02) {
-                    if (Math.floor(now / 16) % 4 === 0) keys['ArrowRight'] = true;
+                    if (Math.floor(now / 16) % 4 === 0) activeInputs['ArrowRight'] = true;
                 } else if (ship.angle > verticalAngle + 0.02) {
-                    if (Math.floor(now / 16) % 4 === 0) keys['ArrowLeft'] = true;
+                    if (Math.floor(now / 16) % 4 === 0) activeInputs['ArrowLeft'] = true;
                 }
 
                 // Only pulse if we've lost our upward momentum before hitting the zone
                 if (ship.y > TARGET_ALT_Y + 10 && ship.yv > -5) {
-                    keys['ArrowUp'] = true;
+                    activeInputs['ArrowUp'] = true;
                 }
 
                 if (Math.abs(distanceToZone) < ALT_ENVELOPE * 0.7) {
@@ -949,17 +2289,17 @@
                     targetAngle = -Math.PI / 2;
                 }
 
-                if (ship.angle < targetAngle - 0.02) keys['ArrowRight'] = true;
-                else if (ship.angle > targetAngle + 0.02) keys['ArrowLeft'] = true;
+                if (ship.angle < targetAngle - 0.02) activeInputs['ArrowRight'] = true;
+                else if (ship.angle > targetAngle + 0.02) activeInputs['ArrowLeft'] = true;
 
                 // 2. 2-AXIS STATION KEEPING (Vertical & Horizontal)
                 const isAligned = Math.abs(ship.angle - targetAngle) < 0.15;
                 const needsHorizCorrection = Math.abs(xvError) > 3;
 
                 if (ship.y > TARGET_ALT_Y || ship.yv > 2) {
-                    if (ship.yv > -4) keys['ArrowUp'] = true; // Vertical thrust
+                    if (ship.yv > -4) activeInputs['ArrowUp'] = true; // Vertical thrust
                 } else if (needsHorizCorrection && isAligned) {
-                    keys['ArrowUp'] = true; // Horizontal correction thrust
+                    activeInputs['ArrowUp'] = true; // Horizontal correction thrust
                 }
 
                 // 3. STRICT DEPLOYMENT ENVELOPE
@@ -986,10 +2326,235 @@
             }
         }
 
-        const startLanding = () => { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); init(false); window.removeEventListener('mousedown', startLanding); window.removeEventListener('keydown', startLanding); };
-        window.addEventListener('mousedown', startLanding); window.addEventListener('keydown', startLanding);
 
-        canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+
+
+
+
+        function getLayout() {
+            const sR = canvas.width / canvas.height;
+            const vR = virtualWidth / virtualHeight;
+            let dW, dH, dX, dY;
+            if (sR > vR) {
+                dH = canvas.height; dW = dH * vR; dX = (canvas.width - dW) / 2; dY = 0;
+            } else {
+                dW = canvas.width; dH = dW / vR; dX = 0; dY = (canvas.height - dH) / 2;
+            }
+            return { dW, dH, dX, dY };
+        }
+
+        function drawControls() {
+            vCtx.save();
+
+            // Config: Change these two lines to resize/move everything at once
+            const radius = 65;
+            const yPos = 1000;
+
+            vCtx.textAlign = 'center';
+            vCtx.font = 'bold 16px sans-serif';
+
+            // 1. Rotation Zone (Left)
+            vCtx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+            vCtx.fillRect(0, 300, 200, 600);
+            vCtx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            vCtx.fillText("ROTATE", 100, 550);
+
+            // 2. Thrust Zone (Right)
+            vCtx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+            vCtx.fillRect(virtualWidth - 200, 300, 200, 600);
+            vCtx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            vCtx.fillText("THRUST", virtualWidth - 100, 550);
+
+            // 3. Bottom Buttons
+            const buttons = [
+                { key: 'KeyS', label: 'STAGE', x: 200 },
+                { key: 'KeyD', label: 'DEPLOY', x: 350 },
+                { key: 'KeyA', label: 'AUTO', x: 500 }
+            ];
+
+            buttons.forEach(b => {
+                vCtx.fillStyle = activeInputs[b.key] ? 'rgba(0, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+                vCtx.beginPath();
+                vCtx.arc(b.x, yPos, radius, 0, Math.PI * 2);
+                vCtx.fill();
+                vCtx.fillStyle = '#fff';
+                vCtx.fillText(b.label, b.x, yPos + 5);
+            });
+            vCtx.restore();
+        }
+
+
+        function handleInput(x, y, isDown) {
+            // 1. Rotation Zone (Left)
+            if (x < 200 && y > 300 && y < 900) {
+                updateInputState('ArrowLeft', isDown && (x < 100));
+                updateInputState('ArrowRight', isDown && (x >= 100));
+            }
+            // 2. Thrust Zone (Right)
+            else if (x >= 1720 && y > 300 && y < 900) {
+                updateInputState('ArrowUp', isDown);
+            }
+            // 3. Action Buttons (Bottom)
+            // Matches Y=1000 +/- 65 (radius)
+            else if (isDown && y > 935 && y < 1065) {
+                // X ranges match centers 200, 350, 500 +/- 65
+                if (x > 135 && x < 265) updateInputState('KeyS', true); // STAGE
+                if (x > 285 && x < 415) updateInputState('KeyD', true); // DEPLOY
+                if (x > 435 && x < 565) updateInputState('KeyA', true); // AUTO
+            }
+        }
+
+        // function drawControls() {
+        //     vCtx.save();
+        //     vCtx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        //     vCtx.textAlign = 'center';
+        //     vCtx.font = '20px sans-serif';
+
+        //     // Left Side: Rotation (Left/Right)
+        //     vCtx.fillRect(0, 300, 150, 400);
+        //     vCtx.fillText("ROTATE", 75, 450);
+
+        //     // Right Side: Thrust
+        //     vCtx.fillRect(virtualWidth - 150, 300, 150, 400);
+        //     vCtx.fillText("THRUST", virtualWidth - 75, 450);
+
+        //     // Bottom Action Buttons
+        //     const buttons = [
+        //         { key: 'KeyS', label: 'STAGE', x: 200 },
+        //         { key: 'KeyD', label: 'DEPLOY', x: 400 },
+        //         { key: 'KeyA', label: 'AUTO', x: 600 }
+        //     ];
+
+        //     buttons.forEach(b => {
+        //         vCtx.fillStyle = activeInputs[b.key] ? 'rgba(0, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.2)';
+        //         vCtx.beginPath();
+        //         vCtx.arc(b.x, virtualPlayHeight - 70, 50, 0, Math.PI * 2);
+        //         vCtx.fill();
+        //         vCtx.fillStyle = '#fff';
+        //         vCtx.fillText(b.label, b.x, virtualPlayHeight - 65);
+        //     });
+        //     vCtx.restore();
+        // }
+
+        // // function handleInput(x, y, isDown) {
+        // //     // Rotation Zone (Left)
+        // //     if (x < 150 && y > 300 && y < 700) {
+        // //         activeInputs['ArrowLeft'] = isDown && (x < 75);
+        // //         activeInputs['ArrowRight'] = isDown && (x >= 75);
+        // //     }
+        // //     // Thrust Zone (Right)
+        // //     if (x > virtualWidth - 150 && y > 300 && y < 700) {
+        // //         activeInputs['ArrowUp'] = isDown;
+        // //     }
+        // //     // Action Buttons
+        // //     if (y > virtualPlayHeight - 150) {
+        // //         if (x > 150 && x < 250) activeInputs['KeyS'] = isDown;
+        // //         if (x > 350 && x < 450) activeInputs['KeyD'] = isDown;
+        // //         if (x > 550 && x < 650) activeInputs['KeyA'] = isDown;
+        // //     }
+        // // }
+
+        // function handleInput(x, y, isDown) {
+        //     // Left Zone (Rotation): 0 to ~500 on X
+        //     if (x < 500 && y > 300 && y < 700) {
+        //         activeInputs['ArrowLeft'] = isDown && (x < 250);
+        //         activeInputs['ArrowRight'] = isDown && (x >= 250);
+        //     }
+
+        //     // Right Zone (Thrust): 1600 to 1920 on X
+        //     // Your center point was 1660, so this perfectly captures the area
+        //     if (x >= 1600 && x <= 1920 && y > 300 && y < 700) {
+        //         activeInputs['ArrowUp'] = isDown;
+        //     }
+
+        //     // Bottom Buttons: Using your coordinate logs
+        //     if (y > 800) {
+        //         if (x > 50 && x < 250) activeInputs['KeyS'] = isDown; // STAGE
+        //         if (x > 250 && x < 450) activeInputs['KeyD'] = isDown; // DEPLOY
+        //         if (x > 450 && x < 650) activeInputs['KeyA'] = isDown; // AUTO
+        //     }
+        // }
+
+
+
+
+
+
+
+        // Add these Event Listeners
+        canvas.addEventListener('touchstart', (e) => {
+            [...e.changedTouches].forEach(t => {
+                const rect = canvas.getBoundingClientRect();
+                const x = (t.clientX - rect.left) * (virtualWidth / canvas.clientWidth);
+                const y = (t.clientY - rect.top) * (virtualHeight / canvas.clientHeight);
+                touchMap.set(t.identifier, { x, y });
+                handleInput(x, y, true);
+            });
+        });
+
+        canvas.addEventListener('touchend', (e) => {
+            [...e.changedTouches].forEach(t => {
+                touchMap.delete(t.identifier);
+                // Reset all inputs on end for simplicity in this game loop
+                Object.keys(activeInputs).forEach(k => activeInputs[k] = false);
+            });
+        });
+
+        // function getCanvasCoordinates(e) {
+        //     // e.offsetX/Y are relative to the canvas itself
+        //     const x = e.offsetX || (e.touches && (e.touches[0].clientX - canvas.getBoundingClientRect().left));
+        //     const y = e.offsetY || (e.touches && (e.touches[0].clientY - canvas.getBoundingClientRect().top));
+
+        //     // Scale these to your virtual 1920x1220 coordinate space
+        //     return {
+        //         x: x * (virtualWidth / canvas.clientWidth),
+        //         y: y * (virtualHeight / canvas.clientHeight)
+        //     };
+        // }
+
+        function getCanvasCoordinates(e) {
+            const rect = canvas.getBoundingClientRect();
+            const layout = getLayout();
+
+            // 1. Get raw click relative to canvas element
+            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+            const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+
+            // 2. Adjust for black bars and scale
+            const x = ((clientX - rect.left) - layout.dX) * (virtualWidth / layout.dW);
+            const y = ((clientY - rect.top) - layout.dY) * (virtualHeight / layout.dH);
+
+            return { x, y };
+        }
+
+
+        // // Attach listeners like this:
+        // canvas.addEventListener('mousedown', (e) => {
+        //     const coords = getCanvasCoordinates(e);
+        //     handleInput(coords.x, coords.y, true);
+        // });
+
+        // canvas.addEventListener('mouseup', (e) => {
+        //     // We need to release everything when mouse leaves/up
+        //     Object.keys(activeInputs).forEach(k => activeInputs[k] = false);
+        // });
+
+
+        canvas.addEventListener('pointerdown', (e) => {
+            const coords = getCanvasCoordinates(e);
+            handleInput(coords.x, coords.y, true);
+        });
+
+        canvas.addEventListener('pointerup', (e) => {
+            // Reset all inputs so buttons don't stay "stuck"
+            updateInputState('ArrowUp', false);
+            updateInputState('ArrowLeft', false);
+            updateInputState('ArrowRight', false);
+            updateInputState('KeyS', false);
+            updateInputState('KeyD', false);
+            updateInputState('KeyA', false);
+        });
+
     </script>
 </body>
 

@@ -14,23 +14,50 @@
             background: #000;
             overflow: hidden;
             color: #fff;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: sans-serif;
+            /* This tells mobile browsers to fill the whole screen including the notch area */
+            padding-bottom: env(safe-area-inset-bottom);
         }
-
-        /* canvas {
-            display: block;
-            width: 100vw;
-            height: 100vh;
-        } */
 
         canvas {
             display: block;
             width: 100vw;
             height: 100vh;
             touch-action: none;
-            /* This prevents the browser from trying to scale/zoom the touch surface */
+            box-sizing: border-box;
+            /* This ensures your game doesn't get covered by the home indicator bar */
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+
+
+        /*
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+            */
+
+        /* canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        } */
+        /*
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            touch-action: none;
             box-sizing: border-box;
         }
+
+        */
 
         #splash {
             position: absolute;
@@ -2186,7 +2213,26 @@
 
         function playIntroSong() { if (!audioCtx) initAudio(); const now = audioCtx.currentTime;[[523.25, 0, 0.15], [659.25, 0.2, 0.15], [783.99, 0.4, 0.15], [1046.5, 0.6, 0.3], [783.99, 0.9, 0.1], [1046.5, 1, 0.5]].forEach(([f, d, du]) => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(f, now + d); g.gain.setValueAtTime(0.06, now + d); g.gain.exponentialRampToValueAtTime(0.001, now + d + du); o.connect(g); g.connect(audioCtx.destination); o.start(now + d); o.stop(now + d + du); }); }
 
-        const startLanding = () => { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); init(false); window.removeEventListener('mousedown', startLanding); window.removeEventListener('keydown', startLanding); };
+        // const startLanding = () => { 
+        //     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); 
+        //     init(false); 
+        //     window.removeEventListener('mousedown', startLanding); 
+        //     window.removeEventListener('keydown', startLanding); 
+        // };
+
+        const startLanding = () => {
+            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+
+            // Add this line to trigger fullscreen
+            requestFullScreen(document.documentElement);
+
+            init(false);
+            window.removeEventListener('mousedown', startLanding);
+            window.removeEventListener('keydown', startLanding);
+            // Also remove touch/pointer events if you added them to start
+            window.removeEventListener('touchstart', startLanding);
+        };
+
         window.addEventListener('mousedown', startLanding); window.addEventListener('keydown', startLanding); canvas.width = window.innerWidth; canvas.height = window.innerHeight;
 
 
@@ -2328,7 +2374,13 @@
 
 
 
-
+        function requestFullScreen(element) {
+            if (element.requestFullscreen) {
+                element.requestFullscreen();
+            } else if (element.webkitRequestFullscreen) { // Required for Safari/iPad
+                element.webkitRequestFullscreen();
+            }
+        }
 
 
         function getLayout() {

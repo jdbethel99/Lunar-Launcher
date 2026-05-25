@@ -27,6 +27,19 @@
             box-sizing: border-box;
             /* This ensures your game doesn't get covered by the home indicator bar */
             padding-bottom: env(safe-area-inset-bottom);
+
+            /* Disable text selection and copying */
+            -webkit-user-select: none;
+            user-select: none;
+
+            /* Disable the iOS long-press callout bubble/menu */
+            -webkit-touch-callout: none;
+
+            /* Disable the flash/highlight effect when you tap */
+            -webkit-tap-highlight-color: transparent;
+
+
+
         }
 
 
@@ -136,10 +149,16 @@
         let rotKeyHeldTime = 0, timeSinceGameOver = 0, audioCtx = null, engineOsc = null, engineGain = null;
 
         //const keys = {};
+        // const activeInputs = {
+        //     'ArrowUp': false, 'ArrowLeft': false, 'ArrowRight': false,
+        //     'KeyS': false, 'KeyD': false, 'KeyA': false
+        // };
+
         const activeInputs = {
             'ArrowUp': false, 'ArrowLeft': false, 'ArrowRight': false,
             'KeyS': false, 'KeyD': false, 'KeyA': false
         };
+        const pointerActionMap = new Map();
 
         // Map touch/mouse identifiers to these keys
         const touchMap = new Map();
@@ -2178,21 +2197,19 @@
         // });
         // window.addEventListener('keyup', e => activeInputs[e.code] = false); window.addEventListener('mousedown', () => { if (!audioCtx) initAudio(); });
 
-
         function updateInputState(code, isPressed) {
-            // ... existing key assignments (ArrowUp, etc) ...
-            if (code === 'ArrowUp') activeInputs['ArrowUp'] = isPressed;
-            if (code === 'ArrowLeft') activeInputs['ArrowLeft'] = isPressed;
-            if (code === 'ArrowRight') activeInputs['ArrowRight'] = isPressed;
-            if (code === 'KeyS') activeInputs['KeyS'] = isPressed;
-            if (code === 'KeyD') activeInputs['KeyD'] = isPressed;
-            if (code === 'KeyA') activeInputs['KeyA'] = isPressed;
+            // Update the visual state map
+            activeInputs[code] = isPressed;
 
             if (isPressed) {
                 // --- ACTION TRIGGERS ---
                 if (code === 'KeyS' && !separated) {
                     triggerSeparationSmoke((ship.x + booster.x) / 2, (ship.y + booster.y) / 2);
-                    playSound('sep'); separated = true; booster.autopilot = true; booster.yv += 22; ship.yv -= 10;
+                    playSound('sep');
+                    separated = true;
+                    booster.autopilot = true;
+                    booster.yv += 22;
+                    ship.yv -= 10;
                 }
                 if (code === 'KeyD') deploySatellites();
                 if (code === 'KeyA') ship.autopilot = !ship.autopilot;
@@ -2201,9 +2218,42 @@
                 if (code === 'KeyR') init(false, true, demoEnabled);
                 if (code === 'KeyE') demoEnabled = !demoEnabled;
                 if (code === 'KeyW') playWacaWaca(3.0);
-                if (splashActive && code === 'Space') { /* ... existing splash logic ... */ }
+
+                // --- SPLASH SCREEN ---
+                if (splashActive && code === 'Space') {
+                    splashActive = false;
+                    splashDiv.style.display = 'none';
+                    missionStart = performance.now();
+                    instructionsStartTime = performance.now();
+                }
             }
         }
+
+        // function updateInputState(code, isPressed) {
+        //     // ... existing key assignments (ArrowUp, etc) ...
+        //     if (code === 'ArrowUp') activeInputs['ArrowUp'] = isPressed;
+        //     if (code === 'ArrowLeft') activeInputs['ArrowLeft'] = isPressed;
+        //     if (code === 'ArrowRight') activeInputs['ArrowRight'] = isPressed;
+        //     if (code === 'KeyS') activeInputs['KeyS'] = isPressed;
+        //     if (code === 'KeyD') activeInputs['KeyD'] = isPressed;
+        //     if (code === 'KeyA') activeInputs['KeyA'] = isPressed;
+
+        //     if (isPressed) {
+        //         // --- ACTION TRIGGERS ---
+        //         if (code === 'KeyS' && !separated) {
+        //             triggerSeparationSmoke((ship.x + booster.x) / 2, (ship.y + booster.y) / 2);
+        //             playSound('sep'); separated = true; booster.autopilot = true; booster.yv += 22; ship.yv -= 10;
+        //         }
+        //         if (code === 'KeyD') deploySatellites();
+        //         if (code === 'KeyA') ship.autopilot = !ship.autopilot;
+
+        //         // --- UTILITY KEYS ---
+        //         if (code === 'KeyR') init(false, true, demoEnabled);
+        //         if (code === 'KeyE') demoEnabled = !demoEnabled;
+        //         if (code === 'KeyW') playWacaWaca(3.0);
+        //         if (splashActive && code === 'Space') { /* ... existing splash logic ... */ }
+        //     }
+        // }
 
         window.addEventListener('keydown', (e) => updateInputState(e.code, true));
         window.addEventListener('keyup', (e) => updateInputState(e.code, false));
@@ -2235,6 +2285,12 @@
 
         window.addEventListener('mousedown', startLanding); window.addEventListener('keydown', startLanding); canvas.width = window.innerWidth; canvas.height = window.innerHeight;
 
+
+        // Add this in your script, near where you add your pointer/touch listeners
+        canvas.addEventListener('contextmenu', e => {
+            e.preventDefault();
+            return false;
+        }, false);
 
 
         function demoUpdate() {
@@ -2395,66 +2451,231 @@
             return { dW, dH, dX, dY };
         }
 
+
+
+        // --- ON-SCREEN CONTROLS CONFIGURATION ---
+        const UI_CFG = {
+            // Rotation (Left) & Thrust (Right) Zones
+            sideY: 300,
+            sideWidth: 200,
+            sideHeight: 600,
+
+            // Circular Action Buttons (Bottom)
+            btnY: 1000,
+            btnRadius: 65,
+            btnStageX: 200,
+            btnDeployX: 350,
+            btnAutoX: 500
+        };
+
         function drawControls() {
             vCtx.save();
-
-            // Config: Change these two lines to resize/move everything at once
-            const radius = 65;
-            const yPos = 1000;
-
             vCtx.textAlign = 'center';
             vCtx.font = 'bold 16px sans-serif';
 
             // 1. Rotation Zone (Left)
             vCtx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-            vCtx.fillRect(0, 300, 200, 600);
+            vCtx.fillRect(0, UI_CFG.sideY, UI_CFG.sideWidth, UI_CFG.sideHeight);
             vCtx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-            vCtx.fillText("ROTATE", 100, 550);
+            vCtx.fillText("ROTATE", UI_CFG.sideWidth / 2, UI_CFG.sideY + 250);
 
             // 2. Thrust Zone (Right)
             vCtx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-            vCtx.fillRect(virtualWidth - 200, 300, 200, 600);
+            vCtx.fillRect(virtualWidth - UI_CFG.sideWidth, UI_CFG.sideY, UI_CFG.sideWidth, UI_CFG.sideHeight);
             vCtx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-            vCtx.fillText("THRUST", virtualWidth - 100, 550);
+            vCtx.fillText("THRUST", virtualWidth - (UI_CFG.sideWidth / 2), UI_CFG.sideY + 250);
 
             // 3. Bottom Buttons
             const buttons = [
-                { key: 'KeyS', label: 'STAGE', x: 200 },
-                { key: 'KeyD', label: 'DEPLOY', x: 350 },
-                { key: 'KeyA', label: 'AUTO', x: 500 }
+                { key: 'KeyS', label: 'STAGE', x: UI_CFG.btnStageX },
+                { key: 'KeyD', label: 'DEPLOY', x: UI_CFG.btnDeployX },
+                { key: 'KeyA', label: 'AUTO', x: UI_CFG.btnAutoX }
             ];
 
             buttons.forEach(b => {
                 vCtx.fillStyle = activeInputs[b.key] ? 'rgba(0, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.1)';
                 vCtx.beginPath();
-                vCtx.arc(b.x, yPos, radius, 0, Math.PI * 2);
+                vCtx.arc(b.x, UI_CFG.btnY, UI_CFG.btnRadius, 0, Math.PI * 2);
                 vCtx.fill();
                 vCtx.fillStyle = '#fff';
-                vCtx.fillText(b.label, b.x, yPos + 5);
+                vCtx.fillText(b.label, b.x, UI_CFG.btnY + 5);
             });
             vCtx.restore();
         }
 
+        function handleInput(x, y, isDown, pointerId) {
+            if (isDown) {
+                // 1. Rotation Zone (Left)
+                if (x < UI_CFG.sideWidth && y > UI_CFG.sideY && y < (UI_CFG.sideY + UI_CFG.sideHeight)) {
+                    const action = (x < UI_CFG.sideWidth / 2) ? 'ArrowLeft' : 'ArrowRight';
+                    updateInputState(action, true);
+                    pointerActionMap.set(pointerId, action);
+                }
+                // 2. Thrust Zone (Right)
+                else if (x >= (virtualWidth - UI_CFG.sideWidth) && y > UI_CFG.sideY && y < (UI_CFG.sideY + UI_CFG.sideHeight)) {
+                    updateInputState('ArrowUp', true);
+                    pointerActionMap.set(pointerId, 'ArrowUp');
+                }
+                // 3. Action Buttons (Bottom)
+                // Check if Y is within the top/bottom bounds of the circles
+                else if (y > (UI_CFG.btnY - UI_CFG.btnRadius) && y < (UI_CFG.btnY + UI_CFG.btnRadius)) {
 
-        function handleInput(x, y, isDown) {
-            // 1. Rotation Zone (Left)
-            if (x < 200 && y > 300 && y < 900) {
-                updateInputState('ArrowLeft', isDown && (x < 100));
-                updateInputState('ArrowRight', isDown && (x >= 100));
-            }
-            // 2. Thrust Zone (Right)
-            else if (x >= 1720 && y > 300 && y < 900) {
-                updateInputState('ArrowUp', isDown);
-            }
-            // 3. Action Buttons (Bottom)
-            // Matches Y=1000 +/- 65 (radius)
-            else if (isDown && y > 935 && y < 1065) {
-                // X ranges match centers 200, 350, 500 +/- 65
-                if (x > 135 && x < 265) updateInputState('KeyS', true); // STAGE
-                if (x > 285 && x < 415) updateInputState('KeyD', true); // DEPLOY
-                if (x > 435 && x < 565) updateInputState('KeyA', true); // AUTO
+                    // Check if X is within the left/right bounds of each specific circle
+                    if (Math.abs(x - UI_CFG.btnStageX) <= UI_CFG.btnRadius) updateInputState('KeyS', true);
+                    if (Math.abs(x - UI_CFG.btnDeployX) <= UI_CFG.btnRadius) updateInputState('KeyD', true);
+                    if (Math.abs(x - UI_CFG.btnAutoX) <= UI_CFG.btnRadius) updateInputState('KeyA', true);
+
+                    // Immediately release them so they don't get "stuck" pressed
+                    setTimeout(() => {
+                        updateInputState('KeyS', false);
+                        updateInputState('KeyD', false);
+                        updateInputState('KeyA', false);
+                    }, 100);
+                }
+            } else {
+                // When lifting finger, find which action it was holding
+                const action = pointerActionMap.get(pointerId);
+                if (action) {
+                    updateInputState(action, false);
+                    pointerActionMap.delete(pointerId);
+                }
             }
         }
+
+
+
+        // function drawControls() {
+        //     vCtx.save();
+
+        //     // Config: Change these two lines to resize/move everything at once
+        //     const radius = 65;
+        //     const yPos = 1000;
+
+        //     vCtx.textAlign = 'center';
+        //     vCtx.font = 'bold 16px sans-serif';
+
+        //     // 1. Rotation Zone (Left)
+        //     vCtx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        //     vCtx.fillRect(0, 300, 200, 600);
+        //     vCtx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        //     vCtx.fillText("ROTATE", 100, 550);
+
+        //     // 2. Thrust Zone (Right)
+        //     vCtx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        //     vCtx.fillRect(virtualWidth - 200, 300, 200, 600);
+        //     vCtx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        //     vCtx.fillText("THRUST", virtualWidth - 100, 550);
+
+        //     // 3. Bottom Buttons
+        //     const buttons = [
+        //         { key: 'KeyS', label: 'STAGE', x: 200 },
+        //         { key: 'KeyD', label: 'DEPLOY', x: 350 },
+        //         { key: 'KeyA', label: 'AUTO', x: 500 }
+        //     ];
+
+        //     buttons.forEach(b => {
+        //         vCtx.fillStyle = activeInputs[b.key] ? 'rgba(0, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+        //         vCtx.beginPath();
+        //         vCtx.arc(b.x, yPos, radius, 0, Math.PI * 2);
+        //         vCtx.fill();
+        //         vCtx.fillStyle = '#fff';
+        //         vCtx.fillText(b.label, b.x, yPos + 5);
+        //     });
+        //     vCtx.restore();
+        // }
+
+
+        // function handleInput(x, y, isDown, pointerId) {
+        //     if (isDown) {
+        //         // 1. Rotation Zone (Left)
+        //         if (x < 200 && y > 300 && y < 900) {
+        //             const action = (x < 100) ? 'ArrowLeft' : 'ArrowRight';
+        //             updateInputState(action, true);
+        //             pointerActionMap.set(pointerId, action);
+        //         }
+        //         // 2. Thrust Zone (Right)
+        //         else if (x >= 1720 && y > 300 && y < 900) {
+        //             updateInputState('ArrowUp', true);
+        //             pointerActionMap.set(pointerId, 'ArrowUp');
+        //         }
+        //         // 3. Action Buttons (Bottom) - Triggered once
+        //         else if (y > 750 && y < 850) {
+        //             if (x > 150 && x < 250) updateInputState('KeyS', true); // STAGE
+        //             if (x > 300 && x < 400) updateInputState('KeyD', true); // DEPLOY
+        //             if (x > 450 && x < 550) updateInputState('KeyA', true); // AUTO
+
+        //             // Immediately release them so they don't get "stuck" pressed
+        //             setTimeout(() => {
+        //                 updateInputState('KeyS', false);
+        //                 updateInputState('KeyD', false);
+        //                 updateInputState('KeyA', false);
+        //             }, 100);
+        //         }
+        //     } else {
+        //         // When lifting finger, find which action it was holding
+        //         const action = pointerActionMap.get(pointerId);
+        //         if (action) {
+        //             updateInputState(action, false);
+        //             pointerActionMap.delete(pointerId);
+        //         }
+        //     }
+        // }
+
+
+        // function handleInput(x, y, isDown, pointerId) {
+        //     if (isDown) {
+        //         let action = null;
+
+        //         // 1. Rotation Zone (Left)
+        //         if (x < 200 && y > 300 && y < 900) {
+        //             action = (x < 100) ? 'ArrowLeft' : 'ArrowRight';
+        //         }
+        //         // 2. Thrust Zone (Right)
+        //         else if (x >= 1720 && y > 300 && y < 900) {
+        //             action = 'ArrowUp';
+        //         }
+        //         // 3. Action Buttons (Bottom)
+        //         else if (y > 750 && y < 1050) {
+        //             if (x > 100 && x < 300) { // STAGE
+        //                 if (!separated) { triggerSeparationSmoke((ship.x + booster.x) / 2, (ship.y + booster.y) / 2); playSound('sep'); separated = true; booster.autopilot = true; booster.yv += 22; ship.yv -= 10; }
+        //             }
+        //             if (x > 300 && x < 500) deploySatellites(); // DEPLOY
+        //             if (x > 500 && x < 700) ship.autopilot = !ship.autopilot; // AUTO
+        //         }
+
+        //         // If a directional action was found, map it to this pointer
+        //         if (action) {
+        //             activeInputs[action] = true;
+        //             pointerActionMap.set(pointerId, action);
+        //         }
+        //     } else {
+        //         // When lifting a finger, only release the action assigned to that specific ID
+        //         const action = pointerActionMap.get(pointerId);
+        //         if (action) {
+        //             activeInputs[action] = false;
+        //             pointerActionMap.delete(pointerId);
+        //         }
+        //     }
+        // }
+        // function handleInput(x, y, isDown) {
+        //     // 1. Rotation Zone (Left)
+        //     if (x < 200 && y > 300 && y < 900) {
+        //         updateInputState('ArrowLeft', isDown && (x < 100));
+        //         updateInputState('ArrowRight', isDown && (x >= 100));
+        //     }
+        //     // 2. Thrust Zone (Right)
+        //     else if (x >= 1720 && y > 300 && y < 900) {
+        //         updateInputState('ArrowUp', isDown);
+        //     }
+        //     // 3. Action Buttons (Bottom)
+        //     // Matches Y=1000 +/- 65 (radius)
+        //     else if (isDown && y > 935 && y < 1065) {
+        //         // X ranges match centers 200, 350, 500 +/- 65
+        //         if (x > 135 && x < 265) updateInputState('KeyS', true); // STAGE
+        //         if (x > 285 && x < 415) updateInputState('KeyD', true); // DEPLOY
+        //         if (x > 435 && x < 565) updateInputState('KeyA', true); // AUTO
+        //     }
+        // }
 
         // function drawControls() {
         //     vCtx.save();
@@ -2580,32 +2801,50 @@
         }
 
 
-        // // Attach listeners like this:
-        // canvas.addEventListener('mousedown', (e) => {
+        // // // Attach listeners like this:
+        // // canvas.addEventListener('mousedown', (e) => {
+        // //     const coords = getCanvasCoordinates(e);
+        // //     handleInput(coords.x, coords.y, true);
+        // // });
+
+        // // canvas.addEventListener('mouseup', (e) => {
+        // //     // We need to release everything when mouse leaves/up
+        // //     Object.keys(activeInputs).forEach(k => activeInputs[k] = false);
+        // // });
+
+
+        // canvas.addEventListener('pointerdown', (e) => {
         //     const coords = getCanvasCoordinates(e);
         //     handleInput(coords.x, coords.y, true);
         // });
 
-        // canvas.addEventListener('mouseup', (e) => {
-        //     // We need to release everything when mouse leaves/up
-        //     Object.keys(activeInputs).forEach(k => activeInputs[k] = false);
+        // canvas.addEventListener('pointerup', (e) => {
+        //     // Reset all inputs so buttons don't stay "stuck"
+        //     updateInputState('ArrowUp', false);
+        //     updateInputState('ArrowLeft', false);
+        //     updateInputState('ArrowRight', false);
+        //     updateInputState('KeyS', false);
+        //     updateInputState('KeyD', false);
+        //     updateInputState('KeyA', false);
         // });
 
 
         canvas.addEventListener('pointerdown', (e) => {
             const coords = getCanvasCoordinates(e);
-            handleInput(coords.x, coords.y, true);
+            handleInput(coords.x, coords.y, true, e.pointerId);
         });
 
         canvas.addEventListener('pointerup', (e) => {
-            // Reset all inputs so buttons don't stay "stuck"
-            updateInputState('ArrowUp', false);
-            updateInputState('ArrowLeft', false);
-            updateInputState('ArrowRight', false);
-            updateInputState('KeyS', false);
-            updateInputState('KeyD', false);
-            updateInputState('KeyA', false);
+            handleInput(0, 0, false, e.pointerId);
+
         });
+
+        // Also handle pointer leaving the canvas area
+        canvas.addEventListener('pointerleave', (e) => {
+            handleInput(0, 0, false, e.pointerId);
+        });
+
+
 
     </script>
 </body>
